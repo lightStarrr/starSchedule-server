@@ -11,9 +11,9 @@ import {
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
 import { Separator } from '@/components/ui/separator'
-import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar'
+import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { AppSidebar } from '@/components/app-sidebar'
 import { CommandMenu } from '@/components/command-menu'
 import { ThemeToggle } from '@/components/theme-toggle'
@@ -95,52 +95,57 @@ export function AppShell() {
   }
 
   return (
-    <>
-      <AppSidebar />
-      <SidebarInset>
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-1 data-[orientation=vertical]:h-4" />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem className="hidden md:block">
-                <Link to="/" className="text-muted-foreground transition-colors hover:text-foreground">
-                  星课表
-                </Link>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator className="hidden md:block" />
-              <BreadcrumbItem>
-                <BreadcrumbPage>{currentTitle(location.pathname)}</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-
-          <div className="ml-auto flex items-center gap-2">
-            <CommandMenu />
-            <ThemeToggle />
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="退出登录"
-                    disabled={loggingOut}
-                    onClick={handleLogout}
+    <TooltipProvider>
+      <SidebarProvider>
+        <AppSidebar />
+        <SidebarInset>
+          <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+            <SidebarTrigger className="-ml-1" />
+            <Separator orientation="vertical" className="mr-1 data-[orientation=vertical]:h-4" />
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem className="hidden md:block">
+                  <Link
+                    to="/"
+                    className="text-muted-foreground transition-colors hover:text-foreground"
                   >
-                    <LogOutIcon />
-                  </Button>
-                }
-              />
-              <TooltipContent>退出登录</TooltipContent>
-            </Tooltip>
-          </div>
-        </header>
+                    星课表
+                  </Link>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator className="hidden md:block" />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>{currentTitle(location.pathname)}</BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
 
-        <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
-          <Outlet />
-        </div>
-      </SidebarInset>
-    </>
+            <div className="ml-auto flex items-center gap-2">
+              <CommandMenu />
+              <ThemeToggle />
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="退出登录"
+                      disabled={loggingOut}
+                      onClick={handleLogout}
+                    >
+                      <LogOutIcon />
+                    </Button>
+                  }
+                />
+                <TooltipContent>退出登录</TooltipContent>
+              </Tooltip>
+            </div>
+          </header>
+
+          <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
+            <Outlet />
+          </div>
+        </SidebarInset>
+      </SidebarProvider>
+    </TooltipProvider>
   )
 }

@@ -97,11 +97,7 @@ func (d *Deps) AdminListProviders(c *gin.Context) {
 	for i := range providers {
 		items = append(items, d.providerJSON(&providers[i]))
 	}
-	var active gin.H
-	if snap, err := d.Catalog.Snapshot(ctx); err == nil {
-		active = gin.H{"provider_id": snap.ProviderID.String(), "model_id": snap.ModelUUID.String(), "alias": snap.Alias}
-	}
-	c.JSON(http.StatusOK, gin.H{"items": items, "active": active})
+	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
 // AdminCreateProvider POST /api/v1/admin/ai/providers

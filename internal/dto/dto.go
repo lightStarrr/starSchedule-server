@@ -71,11 +71,6 @@ type ModelPatchRequest struct {
 	Enabled       *bool   `json:"enabled"`
 }
 
-type ActiveAIRequest struct {
-	ProviderID string `json:"provider_id" binding:"required,uuid"`
-	ModelID    string `json:"model_id" binding:"required,uuid"`
-}
-
 type BanRequest struct {
 	Reason string `json:"reason" binding:"omitempty,max=200"`
 	Banned bool   `json:"banned"`

@@ -153,7 +153,7 @@ export function PlaygroundPage() {
                 <Badge variant="outline" className="font-mono">
                   {selected.alias}
                 </Badge>
-                {isActiveModel ? null : <Badge variant="outline">非当前</Badge>}
+                {isActiveModel ? null : <Badge variant="outline">非默认</Badge>}
               </>
             ) : (
               <Badge variant="outline">未配置模型</Badge>

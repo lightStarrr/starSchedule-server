@@ -172,7 +172,7 @@
 
 ```json
 {
-  "model": { "alias": "deepseek-chat", "display_name": "DeepSeek Chat", "context_window": 65536, "supports_stream": true },
+  "model": { "id": "01JB8Z3K4M5N6P7Q8R9S0T1U2V", "alias": "deepseek-chat", "display_name": "DeepSeek Chat", "context_window": 65536, "supports_stream": true },
   "limits": {
     "rpm": 20,
     "inflight": 2,

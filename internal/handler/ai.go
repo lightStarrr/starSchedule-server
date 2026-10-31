@@ -88,6 +88,7 @@ func (d *Deps) AIConfig(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"model": gin.H{
+			"id":              snap.ModelUUID.String(),
 			"alias":           snap.Alias,
 			"display_name":    snap.DisplayName,
 			"context_window":  snap.ContextWindow,

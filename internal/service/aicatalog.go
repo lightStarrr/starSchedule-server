@@ -51,7 +51,6 @@ func NewAICatalog(st *postgres.Store, rd *redisc.Client, c *crypto.Cipher) *AICa
 }
 
 func (c *AICatalog) Cipher() *crypto.Cipher { return c.cipher }
-func (c *AICatalog) Store() *postgres.Store { return c.store }
 
 // Snapshot 返回「默认模型」配置：优先用后台指定的默认，其次回退到第一个已启用的模型。
 // 完全没配置时返回 ErrAINotConfigured。

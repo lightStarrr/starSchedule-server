@@ -100,7 +100,6 @@ func NewRouter(d *handler.Deps, cfg *config.Config) *gin.Engine {
 	authed.DELETE("/ai/providers/:id", d.AdminDeleteProvider)
 	authed.POST("/ai/providers/:id/test", d.AdminTestProvider)
 	authed.POST("/ai/providers/:id/sync-models", d.AdminSyncModels)
-	authed.POST("/ai/providers/:id/activate", d.AdminActivateProvider)
 
 	authed.GET("/ai/models", d.AdminListModels)
 	authed.GET("/ai/catalog", d.AdminCatalog)
@@ -109,7 +108,6 @@ func NewRouter(d *handler.Deps, cfg *config.Config) *gin.Engine {
 	authed.POST("/ai/models/bulk-delete", d.AdminBulkDeleteModels)
 	authed.DELETE("/ai/models/:id", d.AdminDeleteModel)
 	authed.GET("/ai/active", d.AdminGetActive)
-	authed.PUT("/ai/active", d.AdminSetActive)
 	authed.POST("/ai/playground", d.AIPlayground)
 	authed.GET("/ai/usage", d.AdminAIUsage)
 

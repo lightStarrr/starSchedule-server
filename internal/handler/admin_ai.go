@@ -67,8 +67,8 @@ func (d *Deps) AdminCatalog(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": entries, "active": current})
 }
 
-// ensureDefaultModel 在没有默认模型时，把刚启用的模型设为默认，
-// 避免用户必须先手动点一次「设为默认」才能用。
+// ensureDefaultModel 在没有默认模型时，把刚启用的模型记为默认，
+// 作为客户端不指定 model 时的兜底，避免必须手动配置才能用。
 func (d *Deps) ensureDefaultModel(ctx context.Context, m *model.ProviderModel) {
 	if m == nil || !m.Enabled {
 		return
@@ -225,86 +225,6 @@ func (d *Deps) AdminSyncModels(c *gin.Context) {
 	d.Admin.Audit(c.Request.Context(), adminFromAny(c), "ai.models.sync", "provider", id.String(),
 		map[string]any{"synced": res.Synced, "missing": len(missing)}, c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"synced": res.Synced, "items": items, "missing": missing})
-}
-
-// AdminActivateProvider POST /api/v1/admin/ai/providers/:id/activate
-func (d *Deps) AdminActivateProvider(c *gin.Context) {
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		respond.InvalidArgument(c, "供应商 ID 无效")
-		return
-	}
-	ctx := c.Request.Context()
-	models, err := d.Store.ListModels(ctx, id)
-	if err != nil {
-		respond.Internal(c, "查询模型失败")
-		return
-	}
-	var target *model.ProviderModel
-	for i := range models {
-		if models[i].Enabled {
-			target = &models[i]
-			break
-		}
-	}
-	if target == nil {
-		respond.InvalidArgument(c, "该供应商下没有已启用的模型，请先同步并启用模型")
-		return
-	}
-	if err := d.Store.SetActive(ctx, id, target.ID); err != nil {
-		respond.Internal(c, "切换失败")
-		return
-	}
-	d.Catalog.Invalidate(ctx)
-	d.Admin.Audit(ctx, adminFromAny(c), "ai.active.set", "provider", id.String(),
-		map[string]any{"model": target.ModelID}, c.ClientIP())
-
-	snap, err := d.Catalog.Snapshot(ctx)
-	if err != nil {
-		respond.Internal(c, "切换后读取配置失败")
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"active": gin.H{
-			"provider_id": snap.ProviderID.String(),
-			"model_id":    snap.ModelUUID.String(),
-			"alias":       snap.Alias,
-			"model":       snap.ModelID,
-		},
-	})
-}
-
-// AdminSetActive PUT /api/v1/admin/ai/active
-func (d *Deps) AdminSetActive(c *gin.Context) {
-	var req dto.ActiveAIRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.InvalidArgument(c, "参数校验失败："+err.Error())
-		return
-	}
-	providerID, _ := uuid.Parse(req.ProviderID)
-	modelID, _ := uuid.Parse(req.ModelID)
-
-	ctx := c.Request.Context()
-	m, err := d.Store.GetModel(ctx, modelID)
-	if err != nil {
-		respond.NotFound(c, "模型不存在")
-		return
-	}
-	if m.ProviderID != providerID {
-		respond.InvalidArgument(c, "模型不属于该供应商")
-		return
-	}
-	if !m.Enabled {
-		respond.InvalidArgument(c, "该模型未启用")
-		return
-	}
-	if err := d.Store.SetActive(ctx, providerID, modelID); err != nil {
-		respond.Internal(c, "切换失败")
-		return
-	}
-	d.Catalog.Invalidate(ctx)
-	d.Admin.Audit(ctx, adminFromAny(c), "ai.active.set", "model", modelID.String(), nil, c.ClientIP())
-	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // AdminGetActive GET /api/v1/admin/ai/active

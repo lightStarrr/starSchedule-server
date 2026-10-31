@@ -130,6 +130,13 @@ export function PlaygroundPage() {
     abortRef.current?.abort()
   }
 
+  // 模型被删除/停用后，下拉选中项可能失效，自动回落到第一个可用模型
+  useEffect(() => {
+    if (modelKey && !items.some((item) => item.id === modelKey)) {
+      setModelKey(items[0]?.id ?? '')
+    }
+  }, [items, modelKey])
+
   const selected = items.find((item) => item.id === modelKey)
   const isActiveModel = catalog.data?.active.id === modelKey
 

@@ -133,7 +133,8 @@ export function ModelsPage() {
 
   const items = models.data?.items ?? []
   const enabledCount = items.filter((item) => item.enabled).length
-  const providerItems = providers.data?.items ?? []
+  // 停用的供应商不参与模型管理，避免加完看不见
+  const providerItems = (providers.data?.items ?? []).filter((provider) => provider.enabled)
 
   return (
     <>

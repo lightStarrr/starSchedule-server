@@ -232,7 +232,7 @@ export function DashboardPage() {
           <Card>
             <CardHeader>
               <CardTitle>AI 模型</CardTitle>
-              <CardDescription>当前对外提供的模型配置</CardDescription>
+              <CardDescription>默认模型，客户端不指定时使用</CardDescription>
               <CardAction>
                 <Button variant="ghost" size="xs" render={<Link to="/ai/providers" />}>
                   管理
@@ -255,7 +255,7 @@ export function DashboardPage() {
                       </span>
                     </div>
                     <Badge variant="secondary" className="ml-auto">
-                      已启用
+                      默认
                     </Badge>
                   </div>
                   <Separator />

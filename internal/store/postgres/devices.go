@@ -177,7 +177,7 @@ func (s *Store) ListDevices(ctx context.Context, f DeviceFilter) ([]model.Device
 	}
 	if q := strings.TrimSpace(f.Query); q != "" {
 		args = append(args, "%"+q+"%")
-		where = append(where, fmt.Sprintf("(install_id ILIKE $%d OR id::text = $%d OR android_id_hash = $%d)",
+		where = append(where, fmt.Sprintf("(install_id ILIKE $%d OR id::text ILIKE $%d OR android_id_hash = $%d)",
 			len(args), len(args), len(args)))
 	}
 	if f.Cursor != "" {
@@ -241,7 +241,7 @@ func (s *Store) CountDevices(ctx context.Context, f DeviceFilter) (int64, error)
 	}
 	if q := strings.TrimSpace(f.Query); q != "" {
 		args = append(args, "%"+q+"%")
-		where = append(where, fmt.Sprintf("(install_id ILIKE $%d OR id::text = $%d)", len(args), len(args)))
+		where = append(where, fmt.Sprintf("(install_id ILIKE $%d OR id::text ILIKE $%d)", len(args), len(args)))
 	}
 	var n int64
 	err := s.pool.QueryRow(ctx,
@@ -255,12 +255,14 @@ type DailyActivity struct {
 	LaunchCount int    `json:"launch_count"`
 }
 
-func (s *Store) DeviceDailyActivity(ctx context.Context, deviceID uuid.UUID, days int) ([]DailyActivity, error) {
+func (s *Store) DeviceDailyActivity(ctx context.Context, deviceID uuid.UUID, days int, tz string) ([]DailyActivity, error) {
+	// 用应用时区算「今天」，避免 UTC 与本地区间跨日错位。
 	rows, err := s.pool.Query(ctx, `
 		SELECT to_char(stat_date, 'YYYY-MM-DD'), launch_count
 		FROM daily_active_device
-		WHERE device_id = $1 AND stat_date >= (CURRENT_DATE - $2::int)
-		ORDER BY stat_date`, deviceID, days)
+		WHERE device_id = $1
+		  AND stat_date >= ((now() AT TIME ZONE $3::text)::date - $2::int)
+		ORDER BY stat_date`, deviceID, days, tz)
 	if err != nil {
 		return nil, err
 	}

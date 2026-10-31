@@ -96,7 +96,7 @@ func (d *Deps) AdminDeviceDetail(c *gin.Context) {
 		respond.Internal(c, "查询失败")
 		return
 	}
-	activity, _ := d.Store.DeviceDailyActivity(ctx, id, 30)
+	activity, _ := d.Store.DeviceDailyActivity(ctx, id, 30, d.Loc.String())
 	launches, _ := d.Store.RecentLaunches(ctx, id, 20)
 	usage, _ := d.Store.UsageOn(ctx, d.Device.Today(), id)
 

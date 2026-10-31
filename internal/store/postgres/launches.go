@@ -41,10 +41,10 @@ func (s *Store) InsertLaunch(ctx context.Context, in LaunchInput) (bool, error) 
 	err = tx.QueryRow(ctx, `
 		INSERT INTO launch_events (id, device_id, stat_date, occurred_at, launch_type,
 			platform, app_version, os_version, arch, session_id, extra)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+		VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
 		ON CONFLICT (device_id, session_id, stat_date) DO NOTHING
 		RETURNING 1`,
-		in.ID, in.DeviceID, in.StatDate, in.OccurredAt, in.LaunchType,
+		in.ID, in.DeviceID, dateStr(in.StatDate), in.OccurredAt, in.LaunchType,
 		in.Platform, in.AppVersion, in.OSVersion, in.Arch, in.SessionID, string(extra)).Scan(&one)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -56,12 +56,12 @@ func (s *Store) InsertLaunch(ctx context.Context, in LaunchInput) (bool, error) 
 	if _, err = tx.Exec(ctx, `
 		INSERT INTO daily_active_device (stat_date, device_id, platform, app_version, launch_count,
 			first_launch_at, last_launch_at)
-		VALUES ($1, $2, $3, $4, 1, $5, $5)
+		VALUES ($1::date, $2, $3, $4, 1, $5, $5)
 		ON CONFLICT (stat_date, device_id) DO UPDATE SET
 			launch_count   = daily_active_device.launch_count + 1,
 			last_launch_at = GREATEST(daily_active_device.last_launch_at, EXCLUDED.last_launch_at),
 			app_version    = EXCLUDED.app_version`,
-		in.StatDate, in.DeviceID, in.Platform, in.AppVersion, in.OccurredAt); err != nil {
+		dateStr(in.StatDate), in.DeviceID, in.Platform, in.AppVersion, in.OccurredAt); err != nil {
 		return false, err
 	}
 
@@ -84,14 +84,14 @@ func (s *Store) RebuildDailyStats(ctx context.Context, date time.Time, tz string
 		SELECT $1::date,
 		       COALESCE((SELECT count(*) FROM daily_active_device WHERE stat_date = $1::date), 0),
 		       COALESCE((SELECT sum(launch_count) FROM daily_active_device WHERE stat_date = $1::date), 0),
-		       COALESCE((SELECT count(*) FROM devices WHERE (first_seen_at AT TIME ZONE $2)::date = $1::date), 0),
+		       COALESCE((SELECT count(*) FROM devices WHERE (first_seen_at AT TIME ZONE $2::text)::date = $1::date), 0),
 		       COALESCE((SELECT sum(request_count) FROM ai_usage_daily WHERE stat_date = $1::date), 0),
 		       COALESCE((SELECT sum(prompt_tokens + completion_tokens) FROM ai_usage_daily WHERE stat_date = $1::date), 0),
 		       now()
 		ON CONFLICT (stat_date) DO UPDATE SET
 			dau = EXCLUDED.dau, launches = EXCLUDED.launches, new_devices = EXCLUDED.new_devices,
 			ai_requests = EXCLUDED.ai_requests, ai_tokens = EXCLUDED.ai_tokens, updated_at = now()`,
-		date, tz)
+		dateStr(date), tz)
 	return err
 }
 

@@ -77,6 +77,37 @@ cd web && pnpm install && pnpm dev
 
 只用 Docker 验证时：`docker compose up -d --build`。
 
+## 管理后台
+
+访问 `http://<host>:8080/admin/`，用 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录（首次启动自动创建，之后不覆盖已改密码）。
+
+| 页面 | 能力 |
+| --- | --- |
+| 仪表盘 | 今日 DAU / 启动 / 新增 / AI token，30 天趋势（可切指标），版本分布，当前模型状态 |
+| 设备 | 搜索 install_id 或设备 ID、游标分页、封禁/解封（立即生效） |
+| 设备详情 | 基础信息、近 30 天活跃柱状图、今日 AI 用量、最近启动记录 |
+| AI 供应商 | 新建/编辑（密钥掩码回填）、探活、同步模型、设为启用 |
+| 模型 | 启用开关、手动补充、上下文长度 |
+| AI 试跑 | 流式对话，直连当前供应商，展示首字延迟 / 耗时 / token，不占设备配额 |
+| AI 用量 | 按天或按设备查看 token 与失败数 |
+| 设置 | 配额、限流、保留天数热改，标注默认值与被覆盖项 |
+
+前端构建产物通过 `go:embed` 打进同一个二进制：
+
+```bash
+make web        # 只构建前端到 internal/webui/dist
+make build      # 前端 + 二进制
+```
+
+开发时前后端分离：
+
+```bash
+go run ./cmd/api          # 8080
+cd web && pnpm dev        # 5173，/api 已代理到 8080
+```
+
+组件按 shadcn/ui 官方规范维护：只用 CLI 增删（`pnpm dlx shadcn@latest add <component>`），不要手写 `src/components/ui/*`；`components.json` 与 `pnpm-lock.yaml` 一并提交。官方 skill 已落在 `.workbuddy/skills/shadcn/`。
+
 ## 客户端接口
 
 完整契约（请求头、请求体、响应体、错误码、重试策略）见 `docs/api.md`。

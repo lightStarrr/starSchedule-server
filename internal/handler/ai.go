@@ -71,9 +71,11 @@ func (d *Deps) AIConfig(c *gin.Context) {
 	settings := d.Settings.Get(ctx)
 
 	var used int64
+	var requestCount int64
 	if dev := deviceFromAny(c); dev != nil {
 		if row, err := d.Store.UsageOn(ctx, d.Device.Today(), dev.ID); err == nil {
 			used = row.PromptTokens + row.CompletionTokens
+			requestCount = row.RequestCount
 		}
 	}
 	remaining := settings.DailyTokenQuota - used
@@ -98,7 +100,7 @@ func (d *Deps) AIConfig(c *gin.Context) {
 		"usage": gin.H{
 			"used_tokens":      used,
 			"remaining_tokens": remaining,
-			"request_count":    0,
+			"request_count":    requestCount,
 			"reset_at":         d.resetAt().Format(time.RFC3339),
 		},
 		"server_time": serverNow(),
@@ -240,7 +242,8 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 
 	var quotaKey string
 	var charged int64
-	if caller.ApplyQuota && caller.DeviceID != nil {
+	// 额度为 0 视为不限量（后台可配）。
+	if caller.ApplyQuota && caller.DeviceID != nil && settings.DailyTokenQuota > 0 {
 		quotaKey = redisc.QuotaKey(caller.DeviceID.String(), d.Device.Today().Format("2006-01-02"))
 		charged = int64(promptEstimate + maxOutput)
 		ttl := time.Until(d.resetAt()) + time.Hour

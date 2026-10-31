@@ -318,7 +318,7 @@ func (s *Store) IncrUsage(ctx context.Context, date time.Time, deviceID uuid.UUI
 			completion_tokens = ai_usage_daily.completion_tokens + $5,
 			estimated_count   = ai_usage_daily.estimated_count + $6,
 			updated_at        = now()`,
-		date, deviceID, boolToInt(isError), prompt, completion, boolToInt(estimated))
+		dateStr(date), deviceID, boolToInt(isError), prompt, completion, boolToInt(estimated))
 	return err
 }
 
@@ -326,7 +326,7 @@ func (s *Store) UsageOn(ctx context.Context, date time.Time, deviceID uuid.UUID)
 	var u model.UsageRow
 	err := s.pool.QueryRow(ctx, `
 		SELECT request_count, error_count, prompt_tokens, completion_tokens, estimated_count
-		FROM ai_usage_daily WHERE stat_date = $1::date AND device_id = $2`, date, deviceID).
+		FROM ai_usage_daily WHERE stat_date = $1::date AND device_id = $2`, dateStr(date), deviceID).
 		Scan(&u.RequestCount, &u.ErrorCount, &u.PromptTokens, &u.CompletionTokens, &u.EstimatedCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.UsageRow{}, nil
@@ -361,7 +361,7 @@ func (s *Store) InsertRequestLog(ctx context.Context, l RequestLog) error {
 			model, stream, source, status, http_status, error_code, prompt_tokens, completion_tokens,
 			total_tokens, estimated, first_token_ms, total_ms)
 		VALUES ($1,$2,$3,$4,$5::date,$6,$7,$8,$9,$10,$11,NULLIF($12,''),$13,$14,$15,$16,$17,$18)`,
-		l.ID, l.RequestID, l.DeviceID, l.AdminID, l.StatDate, l.ProviderID, l.Model, l.Stream,
+		l.ID, l.RequestID, l.DeviceID, l.AdminID, dateStr(l.StatDate), l.ProviderID, l.Model, l.Stream,
 		l.Source, l.Status, l.HTTPStatus, l.ErrorCode, l.PromptTokens, l.CompletionTokens,
 		l.TotalTokens, l.Estimated, l.FirstTokenMS, l.TotalMS)
 	return err
@@ -379,7 +379,7 @@ func (s *Store) UsageByDay(ctx context.Context, from, to time.Time) ([]UsageByDa
 		SELECT to_char(stat_date, 'YYYY-MM-DD'),
 		       SUM(request_count), SUM(prompt_tokens + completion_tokens), SUM(error_count)
 		FROM ai_usage_daily WHERE stat_date BETWEEN $1::date AND $2::date
-		GROUP BY stat_date ORDER BY stat_date`, from, to)
+		GROUP BY stat_date ORDER BY stat_date`, dateStr(from), dateStr(to))
 	if err != nil {
 		return nil, err
 	}
@@ -413,7 +413,7 @@ func (s *Store) UsageByDevice(ctx context.Context, from, to time.Time, limit int
 		FROM ai_usage_daily u LEFT JOIN devices d ON d.id = u.device_id
 		WHERE u.stat_date BETWEEN $1::date AND $2::date
 		GROUP BY u.device_id, d.install_id
-		ORDER BY SUM(u.prompt_tokens + u.completion_tokens) DESC LIMIT $3`, from, to, limit)
+		ORDER BY SUM(u.prompt_tokens + u.completion_tokens) DESC LIMIT $3`, dateStr(from), dateStr(to), limit)
 	if err != nil {
 		return nil, err
 	}

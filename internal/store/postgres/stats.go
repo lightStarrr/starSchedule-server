@@ -21,7 +21,7 @@ func (s *Store) ActiveDevicesBetween(ctx context.Context, from, to time.Time) (i
 	var n int64
 	err := s.pool.QueryRow(ctx, `
 		SELECT count(DISTINCT device_id) FROM daily_active_device
-		WHERE stat_date BETWEEN $1::date AND $2::date`, from, to).Scan(&n)
+		WHERE stat_date BETWEEN $1::date AND $2::date`, dateStr(from), dateStr(to)).Scan(&n)
 	return n, err
 }
 
@@ -31,10 +31,10 @@ func (s *Store) DayMetricsOn(ctx context.Context, date time.Time, tz string) (Da
 		SELECT
 			COALESCE((SELECT count(*) FROM daily_active_device WHERE stat_date = $1::date), 0),
 			COALESCE((SELECT sum(launch_count) FROM daily_active_device WHERE stat_date = $1::date), 0),
-			COALESCE((SELECT count(*) FROM devices WHERE (first_seen_at AT TIME ZONE $2)::date = $1::date), 0),
+			COALESCE((SELECT count(*) FROM devices WHERE (first_seen_at AT TIME ZONE $2::text)::date = $1::date), 0),
 			COALESCE((SELECT sum(request_count) FROM ai_usage_daily WHERE stat_date = $1::date), 0),
 			COALESCE((SELECT sum(prompt_tokens + completion_tokens) FROM ai_usage_daily WHERE stat_date = $1::date), 0)`,
-		date, tz)
+		dateStr(date), tz)
 	err := row.Scan(&m.DAU, &m.Launches, &m.NewDevices, &m.AIRequests, &m.AITokens)
 	return m, err
 }
@@ -48,9 +48,9 @@ func (s *Store) Trend(ctx context.Context, from, to time.Time, tz string) ([]mod
 			SELECT stat_date AS d, count(*) AS dau, sum(launch_count) AS launches
 			FROM daily_active_device WHERE stat_date BETWEEN $1::date AND $2::date GROUP BY 1
 		), fresh AS (
-			SELECT (first_seen_at AT TIME ZONE $3)::date AS d, count(*) AS n
+			SELECT (first_seen_at AT TIME ZONE $3::text)::date AS d, count(*) AS n
 			FROM devices
-			WHERE (first_seen_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date
+			WHERE (first_seen_at AT TIME ZONE $3::text)::date BETWEEN $1::date AND $2::date
 			GROUP BY 1
 		), ai AS (
 			SELECT stat_date AS d, sum(request_count) AS req,
@@ -64,7 +64,7 @@ func (s *Store) Trend(ctx context.Context, from, to time.Time, tz string) ([]mod
 		LEFT JOIN active ON active.d = days.d
 		LEFT JOIN fresh  ON fresh.d  = days.d
 		LEFT JOIN ai     ON ai.d     = days.d
-		ORDER BY days.d`, from, to, tz)
+		ORDER BY days.d`, dateStr(from), dateStr(to), tz)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (s *Store) Distribution(ctx context.Context, dim string, from time.Time, li
 	default:
 		return nil, fmt.Errorf("不支持的维度 %q", dim)
 	}
-	rows, err := s.pool.Query(ctx, query, from, limit)
+	rows, err := s.pool.Query(ctx, query, dateStr(from), limit)
 	if err != nil {
 		return nil, err
 	}

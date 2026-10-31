@@ -154,6 +154,43 @@ else
   esac
 fi
 
+# ---------- 4.5 端口占用检查：被占用时自动顺延 ----------
+port_holder() { # 打印占用该端口的进程（尽力而为）
+  if command -v ss >/dev/null 2>&1; then
+    ss -lntp 2>/dev/null | awk -v p="$1" '$4 ~ "[:.]"p"$" {print; exit}'
+  elif command -v netstat >/dev/null 2>&1; then
+    netstat -lntp 2>/dev/null | awk -v p="$1" '$4 ~ "[:.]"p"$" {print; exit}'
+  fi
+}
+
+port_in_use() {
+  if command -v ss >/dev/null 2>&1 || command -v netstat >/dev/null 2>&1; then
+    [ -n "$(port_holder "$1")" ]
+  else
+    docker ps --format '{{.Ports}}' | grep -q ":${1}->"
+  fi
+}
+
+if port_in_use "$HTTP_PORT"; then
+  holder="$(port_holder "$HTTP_PORT")"
+  warn "端口 $HTTP_PORT 已被占用${holder:+：$holder}"
+  for p in $(seq $((HTTP_PORT + 1)) $((HTTP_PORT + 30))); do
+    if ! port_in_use "$p"; then
+      HTTP_PORT="$p"
+      warn "自动改用端口 $HTTP_PORT"
+      break
+    fi
+  done
+  port_in_use "$HTTP_PORT" && die "连续 30 个端口都被占用，请用 HTTP_PORT=<空闲端口> 指定"
+fi
+
+# host 网络下容器直接监听宿主机端口，端口号必须写进 HTTP_ADDR
+if [ "$NET_MODE" = "host" ]; then
+  APP_ADDR=":${HTTP_PORT}"
+else
+  APP_ADDR=":8080"
+fi
+
 # ---------- 5. 确保数据库存在 ----------
 info "检查数据库 $DB_NAME"
 db_exists() {
@@ -210,7 +247,7 @@ cat > "$ENV_FILE" <<EOF
 APP_ENV=production
 APP_TZ=${APP_TZ:-Asia/Shanghai}
 LOG_LEVEL=${LOG_LEVEL:-info}
-HTTP_ADDR=:8080
+HTTP_ADDR=${APP_ADDR}
 
 DATABASE_URL=postgres://${PG_USER}:${PG_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=disable
 REDIS_ADDR=${REDIS_HOST}:${REDIS_PORT}

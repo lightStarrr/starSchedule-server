@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Navigate, useLocation } from 'react-router'
-import { SparklesIcon } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -61,9 +60,11 @@ export function LoginPage() {
       />
       <Card className="relative w-full max-w-sm">
         <CardHeader>
-          <div className="mb-2 flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <SparklesIcon className="size-5" aria-hidden />
-          </div>
+          <img
+            src={`${import.meta.env.BASE_URL}app-icon.webp`}
+            alt="星课表"
+            className="mb-2 size-10 rounded-lg"
+          />
           <CardTitle>登录管理后台</CardTitle>
           <CardDescription>星课表运营与 AI 配置控制台</CardDescription>
         </CardHeader>

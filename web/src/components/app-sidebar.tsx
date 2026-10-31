@@ -7,12 +7,10 @@ import {
   MessageSquareIcon,
   SettingsIcon,
   SmartphoneIcon,
-  SparklesIcon,
 } from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -58,9 +56,11 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" render={<NavLink to="/" />}>
-              <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                <SparklesIcon className="size-4" aria-hidden />
-              </div>
+              <img
+                src={`${import.meta.env.BASE_URL}app-icon.webp`}
+                alt="星课表"
+                className="size-8 shrink-0 rounded-md"
+              />
               <div className="flex flex-col gap-0.5 leading-none group-data-[collapsible=icon]:hidden">
                 <span className="font-medium">星课表</span>
                 <span className="text-xs text-muted-foreground">管理后台</span>
@@ -98,12 +98,6 @@ export function AppSidebar() {
         ))}
       </SidebarContent>
 
-      <SidebarFooter>
-        <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-          <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
-          Android 客户端后端
-        </div>
-      </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   )

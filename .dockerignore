@@ -1,0 +1,13 @@
+.git
+.gitignore
+.github
+.env
+.env.*
+!.env.example
+bin
+tmp
+web/node_modules
+web/dist
+internal/webui/dist/assets
+*.md
+!README.md

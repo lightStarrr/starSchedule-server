@@ -1,0 +1,30 @@
+# 环境变量与密钥
+.env
+.env.*
+!.env.example
+
+# 构建产物
+bin/
+tmp/
+*.exe
+*.test
+*.out
+
+# 前端
+web/node_modules/
+web/dist/
+web/.vite/
+
+# 前端构建输出（保留 .keep 以便 go:embed 始终有内容）
+/internal/webui/dist/*
+!/internal/webui/dist/.keep
+
+# 编辑器与系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 本地日志
+*.log
+coverage.*

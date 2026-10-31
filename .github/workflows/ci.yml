@@ -1,0 +1,151 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 静态检查
+        run: go vet ./...
+      - name: 单元测试
+        run: go test ./... -race -count=1
+      - name: 编译
+        run: CGO_ENABLED=0 go build -trimpath -o bin/api ./cmd/api
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: 类型检查
+        run: pnpm exec tsc -b
+      - name: 构建
+        run: pnpm build
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: [backend]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: starschedule
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      APP_ENV: development
+      HTTP_ADDR: :8080
+      APP_TZ: Asia/Shanghai
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/starschedule?sslmode=disable
+      REDIS_ADDR: localhost:6379
+      DEVICE_JWT_SECRET: ci-device-secret-0123456789abcdef0123456789
+      ADMIN_JWT_SECRET: ci-admin-secret-0123456789abcdef0123456789a
+      DEVICE_FINGERPRINT_PEPPER: ci-pepper
+      APP_ENCRYPTION_KEY: Y2hhbmdlLW1lLWVuY3J5cHRpb24ta2V5LTMyYnl0ZXM=
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: ci-admin-password
+      ALLOW_INSECURE_COOKIE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 迁移
+        run: go run ./cmd/api -migrate-only
+      - name: 冒烟测试
+        run: |
+          set -euo pipefail
+          go build -o /tmp/api ./cmd/api
+          /tmp/api &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/readyz >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8080/healthz
+
+          REG=$(curl -fsS -X POST http://127.0.0.1:8080/api/v1/devices/register \
+            -H 'Content-Type: application/json' \
+            -d '{"install_id":"11111111-2222-4333-8444-555555555555","android_id":"9774d56d682e549c","platform":"android","app_version":"1.0.0","version_code":1,"os_version":"14","sdk_int":34,"arch":"arm64-v8a"}')
+          echo "$REG"
+          TOKEN=$(echo "$REG" | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+
+          curl -fsS -X POST http://127.0.0.1:8080/api/v1/launches \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            -d '{"session_id":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","launch_type":"cold"}' \
+            -o /dev/null -w 'launch=%{http_code}\n'
+
+          curl -fsS http://127.0.0.1:8080/api/v1/devices/me -H "Authorization: Bearer $TOKEN"
+          curl -fsS -o /dev/null -w 'admin_ui=%{http_code}\n' http://127.0.0.1:8080/admin/
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

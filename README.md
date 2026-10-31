@@ -173,7 +173,53 @@ cd web && pnpm dev        # 5173，/api 已代理到 8080
 
 `api` 是无状态服务：容器只读根文件系统，仅挂 `tmpfs: /tmp`，本身不需要持久化。
 
-如果希望数据落在主机目录（方便直接打包备份），用 override 文件改绑定挂载，不要改动主 compose：
+#### 命名卷为什么也算持久化
+
+容器有两层存储，别混为一谈：
+
+| 存储 | 位置 | 容器删除后 | 宿主机重启后 |
+| --- | --- | --- | --- |
+| 容器可写层 | 容器内部 | **丢失** | 保留 |
+| 命名卷（本项目默认） | Docker 管理区，Linux 上是 `/var/lib/docker/volumes/` | **保留** | 保留 |
+| 绑定挂载（映射主机目录） | 你自己指定的目录 | **保留** | 保留 |
+
+compose 里已经声明了 `volumes: pgdata:/var/lib/postgresql/data`，所以数据写在命名卷里，不在容器可写层。容器重建、改镜像重新 `up`、`docker compose down` 都不影响它。
+
+**会丢数据的只有这几种操作**：
+
+- `docker compose down -v`（`-v` 会删卷）
+- `docker volume rm starschedule_pgdata`
+- `docker volume prune` 或 `docker system prune --volumes`
+- 换机器时不迁移卷
+
+**不会丢数据的操作**：`docker restart`、`docker compose restart`、`docker compose down`（不带 `-v`）、`docker compose up -d --build` 升级、宿主机重启。
+
+确认卷是否存在：
+
+```bash
+docker volume ls | grep starschedule          # starschedule_pgdata / starschedule_redisdata
+docker volume inspect starschedule_pgdata     # 看 Mountpoint
+```
+
+> 用 Docker Desktop（macOS / Windows）时，卷在虚拟机内部，宿主机文件管理器里看不到 Mountpoint 路径，这是正常的；备份用下面的命令，不要试图直接拷贝目录。
+
+#### 备份
+
+命名卷最稳的备份方式是逻辑导出，不依赖卷在哪：
+
+```bash
+# 数据库
+docker compose exec -T postgres pg_dump -U starschedule starschedule | gzip > backup-$(date +%F).sql.gz
+
+# 恢复
+gunzip -c backup-2026-10-31.sql.gz | docker compose exec -T postgres psql -U starschedule -d starschedule
+```
+
+Redis 里只有限流计数、配额与缓存，丢了会重建（配额会从 0 重新算），一般不必备份；要备就连同 `/data` 一起打包。
+
+#### 改成映射到主机目录（可选）
+
+如果希望数据目录在项目下、方便打包整机迁移，用 override 文件改绑定挂载，不要改动主 compose：
 
 ```yaml
 # docker-compose.override.yml（compose 会自动合并）

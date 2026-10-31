@@ -164,6 +164,42 @@ cd web && pnpm dev        # 5173，/api 已代理到 8080
 
 > `.env` 里的 `DATABASE_URL`、`REDIS_ADDR` 只在「不用 compose、直接跑二进制」时需要；compose 会用 `POSTGRES_*` 自动拼出连接串，并固定连 `redis:6379`。
 
+### 端口与网络
+
+**只需要对外暴露一个端口**：`api` 的 8080。
+
+| 服务 | 容器端口 | 是否映射到宿主机 | 说明 |
+| --- | --- | --- | --- |
+| `api` | 8080 | 是，`${HTTP_PORT:-8080}` → 8080 | 客户端与管理后台都走这里 |
+| `postgres` | 5432 | **否** | 仅容器网络内可达 |
+| `redis` | 6379 | **否** | 仅容器网络内可达 |
+
+网络方面没有特殊配置，compose 会自建一个 bridge 网络，服务之间用名字解析（`postgres:5432`、`redis:6379`）。需要满足的出站条件：
+
+- 拉镜像：服务器能访问 `ghcr.io`（以及 `docker.io` 拉基础镜像）。
+- AI 代理：`api` 需要能访问你在后台配置的供应商域名（如 `api.deepseek.com`）。
+- 如果服务器只能通过代理出网，给 `api` 补上代理变量（代码里走 `http.ProxyFromEnvironment`）：
+
+```yaml
+# docker-compose.override.yml
+services:
+  api:
+    environment:
+      HTTPS_PROXY: http://your-proxy:3128
+      HTTP_PROXY: http://your-proxy:3128
+      NO_PROXY: postgres,redis,localhost,127.0.0.1
+```
+
+前面挂了 Caddy/Nginx 时，建议把端口只绑到本机回环，避免绕过反代直接访问 8080：
+
+```yaml
+# docker-compose.override.yml
+services:
+  api:
+    ports:
+      - "127.0.0.1:8080:8080"
+```
+
 ### 数据持久化
 
 默认用 Docker 命名卷，**不需要映射任何主机路径**：

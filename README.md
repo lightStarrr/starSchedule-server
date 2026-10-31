@@ -215,6 +215,71 @@ services:
 - 三个容器要放进**同一个自定义网络**，容器名分别设为 `postgres` 和 `redis`，否则 `DATABASE_URL` / `REDIS_ADDR` 里的主机名解析不到。
 - 环境变量清单与上一节相同，`api` 的环境变量直接照抄即可。
 
+### 使用已有的 PostgreSQL / Redis
+
+服务器上已经装了 PostgreSQL 和 Redis 时，别再用自带的容器，改用 `docker-compose.external.yml`——它只启动 `api`，通过 `host.docker.internal` 连宿主机。
+
+**前提检查**
+
+```bash
+psql --version        # 需要 13+（用到 gen_random_uuid 与声明式分区），推荐 14/16
+redis-server --version # 6+ 即可
+```
+
+**1. 建库和账号**
+
+```sql
+-- 用 postgres 超级用户执行
+CREATE USER starschedule WITH PASSWORD '换成强密码';
+CREATE DATABASE starschedule OWNER starschedule;
+```
+
+**2. 让容器能连上**
+
+容器走 docker bridge 访问宿主机，所以 PG 必须监听非回环地址：
+
+```conf
+# postgresql.conf
+listen_addresses = '*'
+```
+
+```conf
+# pg_hba.conf，放行 docker 网段
+host    starschedule    starschedule    172.16.0.0/12    scram-sha-256
+```
+
+```bash
+sudo systemctl reload postgresql
+```
+
+Redis 同理：如果 `bind 127.0.0.1` 且没设密码，容器连不上，需要改成 `bind 0.0.0.0` 并设置 `requirepass`。
+
+**3. 改 `.env`**
+
+```ini
+APP_IMAGE=ghcr.io/lightstarrr/starschedule-server:latest
+DATABASE_URL=postgres://starschedule:强密码@host.docker.internal:5432/starschedule?sslmode=disable
+REDIS_ADDR=host.docker.internal:6379
+REDIS_PASSWORD=<Redis 密码，无密码留空>
+REDIS_DB=0
+# 其余密钥照旧：DEVICE_JWT_SECRET / ADMIN_JWT_SECRET / DEVICE_FINGERPRINT_PEPPER /
+# APP_ENCRYPTION_KEY / ADMIN_PASSWORD
+```
+
+用 `REDIS_DB` 换一个库号，可以避免和别的业务共用 key 空间（键前缀是 `rl:`、`quota:ai:`、`ban:device:`、`cache:`）。
+
+**4. 启动**
+
+```bash
+docker compose -f docker-compose.external.yml pull
+docker compose -f docker-compose.external.yml up -d     # 或 make up-external
+curl -s http://127.0.0.1:8080/readyz
+```
+
+**如果 PG / Redis 只监听 127.0.0.1 且不想改配置**（仅 Linux）：把该文件里的 `ports` 段删掉，给 `api` 加 `network_mode: host`，`DATABASE_URL`、`REDIS_ADDR` 改用 `127.0.0.1`。
+
+> 迁移由 `api` 启动时自动执行，不需要单独的 migrate 容器；同一个库重复执行是幂等的。
+
 ### 数据持久化
 
 默认用 Docker 命名卷，**不需要映射任何主机路径**：

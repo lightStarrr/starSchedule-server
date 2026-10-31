@@ -24,6 +24,7 @@ help:
 	@echo "make update     等价于 pull + up，用于服务器升级"
 	@echo "make pull       只拉取镜像"
 	@echo "make up-local   本地源码构建并启动（不拉 GHCR 镜像）"
+	@echo "make up-external 使用宿主机已有的 PostgreSQL / Redis 启动"
 	@echo "make down       停止 compose（保留数据卷）"
 	@echo "make logs       跟踪 api 日志"
 
@@ -80,6 +81,12 @@ update: pull
 .PHONY: up-local
 up-local:
 	docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+
+# 使用服务器上已有的 PostgreSQL / Redis，只跑 api
+.PHONY: up-external
+up-external:
+	docker compose -f docker-compose.external.yml pull
+	docker compose -f docker-compose.external.yml up -d
 
 .PHONY: down
 down:

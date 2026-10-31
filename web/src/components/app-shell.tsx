@@ -17,7 +17,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { AppSidebar } from '@/components/app-sidebar'
 import { CommandMenu } from '@/components/command-menu'
 import { ThemeToggle } from '@/components/theme-toggle'
-import { api, ApiError } from '@/lib/api'
+import { api, ApiError, errorMessage } from '@/lib/api'
 import type { AdminProfile } from '@/lib/types'
 
 const titles: Record<string, string> = {
@@ -64,10 +64,21 @@ export function AppShell() {
   }
 
   if (me.error) {
-    const unauthorized = me.error instanceof ApiError && me.error.status === 401
-    if (unauthorized || me.error instanceof ApiError) {
+    const status = me.error instanceof ApiError ? me.error.status : 0
+    if (status === 401 || status === 403) {
       return <Navigate to="/login" replace state={{ from: location.pathname }} />
     }
+    return (
+      <div className="grid min-h-svh place-items-center p-6">
+        <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+          <p className="font-heading text-lg">无法连接服务端</p>
+          <p className="text-sm text-muted-foreground">{errorMessage(me.error)}</p>
+          <Button variant="outline" size="sm" onClick={() => void me.refetch()}>
+            重试
+          </Button>
+        </div>
+      </div>
+    )
   }
 
   const handleLogout = async () => {

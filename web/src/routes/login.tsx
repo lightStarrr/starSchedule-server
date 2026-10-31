@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Navigate, useLocation } from 'react-router'
 import { SparklesIcon } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -13,6 +13,7 @@ import type { AdminProfile } from '@/lib/types'
 
 export function LoginPage() {
   const location = useLocation()
+  const queryClient = useQueryClient()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -25,7 +26,11 @@ export function LoginPage() {
         method: 'POST',
         body: { username: username.trim(), password },
       }),
-    onSuccess: () => setDone(true),
+    onSuccess: () => {
+      // 清掉登录失败期间缓存的 401，避免外壳组件直接弹回登录页
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'me'] })
+      setDone(true)
+    },
     onError: (err) => {
       setError(errorMessage(err))
       if (err instanceof ApiError && err.code === 'RATE_LIMITED') {

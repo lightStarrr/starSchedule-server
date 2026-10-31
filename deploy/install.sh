@@ -6,7 +6,10 @@
 #   sudo PG_PASSWORD=xxx APP_IMAGE=ghcr.io/lightstarrr/starschedule-server:sha-b0593e0 bash deploy/install.sh
 #
 # 可选环境变量：
-#   APP_IMAGE        镜像地址，默认 ghcr.io/lightstarrr/starschedule-server:latest
+#   REGISTRY         镜像仓库域名，默认 ghcr.io；可换成加速镜像站（如 ghcr.nju.edu.cn）
+#   IMAGE_PATH       镜像路径，默认 lightstarrr/starschedule-server
+#   IMAGE_TAG        镜像标签，默认 latest
+#   APP_IMAGE        直接指定完整镜像地址，优先级最高
 #   PG_CONTAINER     PostgreSQL 容器名，默认自动探测包含 postgres 的容器
 #   REDIS_CONTAINER  Redis 容器名，默认自动探测包含 redis 的容器
 #   PG_USER / PG_PASSWORD / DB_NAME  默认从容器环境变量读取，DB_NAME 默认 starschedule
@@ -18,7 +21,11 @@
 
 set -euo pipefail
 
-APP_IMAGE="${APP_IMAGE:-ghcr.io/lightstarrr/starschedule-server:latest}"
+REGISTRY="${REGISTRY:-ghcr.io}"
+REGISTRY="${REGISTRY%/}"
+IMAGE_PATH="${IMAGE_PATH:-lightstarrr/starschedule-server}"
+IMAGE_TAG="${IMAGE_TAG:-latest}"
+APP_IMAGE="${APP_IMAGE:-${REGISTRY}/${IMAGE_PATH}:${IMAGE_TAG}}"
 CONTAINER_NAME="${CONTAINER_NAME:-starschedule}"
 HTTP_PORT="${HTTP_PORT:-8080}"
 DB_NAME="${DB_NAME:-starschedule}"
@@ -192,8 +199,11 @@ ok "已写入 $ENV_FILE"
 # ---------- 6. 拉取镜像 ----------
 info "拉取镜像 $APP_IMAGE"
 if ! docker pull "$APP_IMAGE" >/dev/null 2>&1; then
-  warn "拉取失败，可能需要登录 GHCR（私有包）"
-  die "请先执行 docker login ghcr.io -u <GitHub 用户名> -p <PAT>，或把包设为 Public 后重试"
+  if [ "$REGISTRY" = "ghcr.io" ]; then
+    warn "拉取失败：GHCR 私有包需要先登录"
+    die "执行 docker login ghcr.io -u <GitHub 用户名> -p <PAT> 后重试，或把包设为 Public；也可用 REGISTRY=镜像加速域名 重跑"
+  fi
+  die "拉取失败：镜像加速站可能不支持该镜像或尚未同步，换回 REGISTRY=ghcr.io 重试"
 fi
 
 # ---------- 7. 启动容器 ----------
@@ -258,6 +268,7 @@ $(ok "部署完成")
   用户名     ${ADMIN_USERNAME}
   密码       ${ADMIN_PASSWORD}
   配置文件   ${ENV_FILE}
+  镜像       ${APP_IMAGE}
   数据库     ${DB_NAME} @ ${PG_CONTAINER}:${PG_PORT}
   Redis      ${REDIS_CONTAINER}:${REDIS_PORT}
 

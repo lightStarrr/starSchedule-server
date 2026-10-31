@@ -221,12 +221,18 @@ services:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lightStarrr/starSchedule-server/master/deploy/install.sh -o /tmp/install.sh \
-  && sudo PG_PASSWORD=<PG密码> APP_IMAGE=ghcr.io/lightstarrr/starschedule-server:latest bash /tmp/install.sh
+  && sudo PG_PASSWORD=<PG密码> bash /tmp/install.sh
+```
+
+默认拉 `ghcr.io/lightstarrr/starschedule-server:latest`。国内拉取慢时可换镜像加速站：
+
+```bash
+sudo PG_PASSWORD=<PG密码> REGISTRY=ghcr.nju.edu.cn bash /tmp/install.sh
 ```
 
 脚本会自动：探测 PG/Redis 容器并读取凭据 → 建库 → 生成密钥 → 拉镜像 → 启动容器 → 等健康检查 → 打印后台地址与管理员密码。可重复执行，已生成的密钥不会变。
 
-可选变量：`PG_CONTAINER`、`REDIS_CONTAINER`、`DB_NAME`、`HTTP_PORT`、`ADMIN_PASSWORD`、`REDIS_PASSWORD`。
+可选变量：`REGISTRY`、`IMAGE_TAG`、`APP_IMAGE`、`PG_CONTAINER`、`REDIS_CONTAINER`、`DB_NAME`、`HTTP_PORT`、`ADMIN_PASSWORD`、`REDIS_PASSWORD`。
 
 ### 使用已有的 PostgreSQL / Redis
 

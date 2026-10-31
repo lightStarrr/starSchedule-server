@@ -81,26 +81,28 @@ if [ -z "${REDIS_PASSWORD:-}" ]; then
 fi
 
 # ---------- 2. 用 TCP 验证 PostgreSQL（容器内的本地 socket 往往是 trust，验不出密码）----------
-# 候选用户：容器环境变量里的用户、postgres、与库同名用户
+# 候选顺序：显式指定的 PG_USER → 库同名用户（1Panel 常见）→ 容器环境变量用户 → postgres
 CANDIDATES=()
-[ -n "$PG_USER" ] && CANDIDATES+=("$PG_USER")
+[ -n "${PG_USER:-}" ] && CANDIDATES+=("$PG_USER")
+CANDIDATES+=("$DB_NAME")
 v="$(container_env "$PG_CONTAINER" POSTGRES_USER)"
 [ -n "$v" ] && CANDIDATES+=("$v")
-CANDIDATES+=("postgres" "$DB_NAME")
+CANDIDATES+=("postgres")
+CANDIDATES=($(printf '%s\n' "${CANDIDATES[@]}" | awk 'NF && !seen[$0]++'))
 
 pg_auth() { # $1=user
   docker exec -e PGPASSWORD="$PG_PASSWORD" "$PG_CONTAINER" \
     psql -h 127.0.0.1 -U "$1" -d postgres -tAc 'SELECT 1' >/dev/null 2>&1
 }
 
-info "验证 PostgreSQL 账号密码"
+info "验证 PostgreSQL 账号密码（候选：${CANDIDATES[*]}）"
 PG_USER=""
-for u in $(printf '%s\n' "${CANDIDATES[@]}" | awk '!seen[$0]++'); do
+for u in "${CANDIDATES[@]}"; do
   if pg_auth "$u"; then PG_USER="$u"; break; fi
 done
 if [ -z "$PG_USER" ]; then
-  warn "候选用户（$(printf '%s ' "${CANDIDATES[@]}")）用该密码均无法登录"
-  die "密码不正确。请在 1Panel → 数据库 里查看 $DB_NAME 对应用户的密码，用 PG_PASSWORD=... 重新执行"
+  warn "以上候选用户用该密码均无法登录"
+  die "密码与账号不匹配。请确认 1Panel 里该库的用户名，用 PG_USER=<用户名> PG_PASSWORD=<密码> 重新执行"
 fi
 ok "PostgreSQL 认证通过，用户：$PG_USER"
 
@@ -168,6 +170,14 @@ else
   else
     die "创建数据库失败：用户 $PG_USER 没有建库权限，请先在 1Panel 里创建 $DB_NAME"
   fi
+fi
+
+# 建表权限：public schema 无 CREATE 权限时迁移会失败
+schema_ok="$(docker exec -e PGPASSWORD="$PG_PASSWORD" "$PG_CONTAINER" \
+  psql -h 127.0.0.1 -U "$PG_USER" -d "$DB_NAME" -tAc \
+  "SELECT has_schema_privilege(current_user, 'public', 'CREATE')" 2>/dev/null | tr -d '[:space:]')"
+if [ "$schema_ok" != "t" ]; then
+  die "用户 $PG_USER 对 $DB_NAME 的 public schema 没有建表权限：请改用库 owner 账号，或执行 GRANT CREATE ON SCHEMA public TO \"$PG_USER\";"
 fi
 
 # ---------- 6. 密钥 ----------

@@ -250,7 +250,7 @@ CI 在 `.github/workflows/ci.yml`，镜像由 `GITHUB_TOKEN` 推送到 GHCR，�
 
 | 触发 | 行为 | 产出 tag |
 | --- | --- | --- |
-| 推到 `main` | 构建并推送多架构镜像 | `latest`、`main`、`sha-xxxxxxx` |
+| 推到默认分支（`master` 或 `main`） | 构建并推送多架构镜像 | `latest`、分支名、`sha-xxxxxxx` |
 | 打 `v*` tag（如 `v1.2.3`） | 构建并推送 | `1.2.3`、`1.2`、`latest`、`sha-xxxxxxx` |
 | Pull Request | 只验证能否构建，不推送 | — |
 

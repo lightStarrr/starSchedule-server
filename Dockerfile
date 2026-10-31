@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1.7
 
 # ---------- 前端构建 ----------
-FROM node:22-alpine AS web
+# 前端产物与架构无关，固定在构建机上跑，避免多架构构建时走 QEMU 模拟
+FROM --platform=$BUILDPLATFORM node:22-alpine AS web
 WORKDIR /web
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 COPY web/package.json web/pnpm-lock.yaml ./

@@ -2,13 +2,15 @@
 
 「星课表」Android 客户端的后端服务：设备注册、启动统计、AI 模型代理，附带一套 React + shadcn/ui 管理后台（构建产物 embed 进同一个二进制）。
 
-一条命令拉起全部依赖：
+一条命令拉起全部依赖（镜像由 GitHub Actions 发布到 GHCR）：
 
 ```bash
-cp .env.example .env   # 按提示改掉所有 change-me
-docker compose up -d --build
+cp .env.example .env   # 改 APP_IMAGE 与七个必填项
+docker compose pull && docker compose up -d
 curl http://localhost:8080/readyz
 ```
+
+本地改完代码要立即生效，用 `make up-local` 源码构建，不走镜像仓库。
 
 - 客户端接口：`/api/v1/*`
 - 管理后台：`http://localhost:8080/admin/`
@@ -75,7 +77,7 @@ go run ./cmd/api
 cd web && pnpm install && pnpm dev
 ```
 
-只用 Docker 验证时：`docker compose up -d --build`。
+只用 Docker 验证时：`make up-local`（源码构建，不拉镜像）。
 
 ## 管理后台
 
@@ -192,7 +194,7 @@ compose 里已经声明了 `volumes: pgdata:/var/lib/postgresql/data`，所以�
 - `docker volume prune` 或 `docker system prune --volumes`
 - 换机器时不迁移卷
 
-**不会丢数据的操作**：`docker restart`、`docker compose restart`、`docker compose down`（不带 `-v`）、`docker compose up -d --build` 升级、宿主机重启。
+**不会丢数据的操作**：`docker restart`、`docker compose restart`、`docker compose down`（不带 `-v`）、`docker compose up -d`（换镜像重建容器）、宿主机重启。
 
 确认卷是否存在：
 
@@ -242,17 +244,42 @@ sudo chown -R 999:999 data/redis      # redis:alpine 的 uid/gid
 
 备份也就变成：`pg_dump` 逻辑备份，或直接打包 `data/` 目录 / `pgdata` 卷。
 
-### 首次部署
+### 镜像发布与更新（GitHub Actions → GHCR）
+
+CI 在 `.github/workflows/ci.yml`，镜像由 `GITHUB_TOKEN` 推送到 GHCR，无需额外配置 secret（仓库需允许 Actions 写 Packages，默认允许）。
+
+| 触发 | 行为 | 产出 tag |
+| --- | --- | --- |
+| 推到 `main` | 构建并推送多架构镜像 | `latest`、`main`、`sha-xxxxxxx` |
+| 打 `v*` tag（如 `v1.2.3`） | 构建并推送 | `1.2.3`、`1.2`、`latest`、`sha-xxxxxxx` |
+| Pull Request | 只验证能否构建，不推送 | — |
+
+镜像地址：`ghcr.io/<你的用户名或组织>/starschedule-server`，路径必须全小写，CI 里已自动转换。
+
+**服务器首次部署：**
 
 ```bash
 cp .env.example .env
-vim .env                      # 按上表改七个必填项
+vim .env                      # 改 APP_IMAGE 为上面的地址 + 七个必填项
 chmod 600 .env
-docker compose up -d --build
-curl http://127.0.0.1:8080/readyz    # {"ready":true,...}
+docker login ghcr.io -u <GitHub 用户名> -p <PAT>   # 包为私有时需要，PAT 勾 read:packages
+docker compose pull && docker compose up -d
+curl http://127.0.0.1:8080/readyz
 ```
 
-浏览器打开 `http://<host>:8080/admin/`，用 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录，先配供应商再同步模型。
+**日常更新与回滚：**
+
+```bash
+make update                                   # = pull + up，拉 latest 并重建容器
+# 回滚到某个提交的镜像
+APP_IMAGE=ghcr.io/<name>/starschedule-server:sha-1a2b3c4 docker compose up -d
+# 或指定版本号
+APP_IMAGE=ghcr.io/<name>/starschedule-server:1.2.2 docker compose up -d
+```
+
+- 升级时 `migrate` 容器会用新镜像先跑一次迁移，成功后才替换 `api`；迁移是幂等的，回滚代码不需要回滚数据库（历史迁移不会重复执行）。
+- 想让包公开（服务器免登录拉取）：仓库 → Packages → 该镜像 → Package settings → Change visibility → Public。
+- 本地改代码要即时生效，用 `make up-local`（走 `docker-compose.build.yml` 本地构建），不要用 `make up`。
 
 ### 其它注意
 

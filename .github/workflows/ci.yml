@@ -11,6 +11,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # GHCR 要求镜像路径全小写，仓库名含大写时需在 job 内转换
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -120,32 +124,66 @@ jobs:
           curl -fsS http://127.0.0.1:8080/api/v1/devices/me -H "Authorization: Bearer $TOKEN"
           curl -fsS -o /dev/null -w 'admin_ui=%{http_code}\n' http://127.0.0.1:8080/admin/
 
-  docker:
+  image:
     runs-on: ubuntu-latest
     needs: [backend, frontend]
-    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: 计算小写镜像地址
+        id: prep
+        run: echo "image=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+
+      - name: 登录 GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+
+      - name: 生成 tag
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.prep.outputs.image }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: 构建并推送
+        uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
+          # PR 只验证能否构建，不推送也不跑多架构
+          push: ${{ github.event_name != 'pull_request' }}
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ github.ref_name }}
+            VERSION=${{ steps.meta.outputs.version }}
             COMMIT=${{ github.sha }}
-          tags: |
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: 输出镜像摘要
+        if: github.event_name != 'pull_request'
+        run: |
+          {
+            echo "### 镜像已发布"
+            echo ""
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo ""
+            echo "服务器更新：\`docker compose pull && docker compose up -d\`"
+          } >> "$GITHUB_STEP_SUMMARY"

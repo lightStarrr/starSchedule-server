@@ -20,8 +20,11 @@ help:
 	@echo "make vet        静态检查"
 	@echo "make fmt        格式化"
 	@echo "make migrate    只执行数据库迁移"
-	@echo "make up         启动 compose（pg + redis + migrate + api）"
-	@echo "make down       停止 compose"
+	@echo "make up         拉取 GHCR 镜像并启动（pg + redis + migrate + api）"
+	@echo "make update     等价于 pull + up，用于服务器升级"
+	@echo "make pull       只拉取镜像"
+	@echo "make up-local   本地源码构建并启动（不拉 GHCR 镜像）"
+	@echo "make down       停止 compose（保留数据卷）"
 	@echo "make logs       跟踪 api 日志"
 
 .PHONY: web
@@ -60,9 +63,23 @@ fmt:
 migrate:
 	go run ./cmd/api -migrate-only
 
+.PHONY: pull
+pull:
+	docker compose pull
+
+# 服务器部署：用 GHCR 上的镜像启动，不在本机构建
 .PHONY: up
-up:
-	docker compose up -d --build
+up: pull
+	docker compose up -d
+
+.PHONY: update
+update: pull
+	docker compose up -d
+
+# 本地开发：源码构建，镜像名仍取 APP_IMAGE
+.PHONY: up-local
+up-local:
+	docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 .PHONY: down
 down:

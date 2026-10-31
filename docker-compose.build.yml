@@ -1,0 +1,18 @@
+# 本地源码构建的覆盖文件，不用于服务器部署。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# 或直接 make up-local。镜像仍使用 APP_IMAGE 指定的名字，只是改为本地构建。
+services:
+  migrate:
+    build:
+      context: .
+      args:
+        VERSION: ${APP_VERSION:-dev}
+        COMMIT: ${APP_COMMIT:-none}
+  api:
+    build:
+      context: .
+      args:
+        VERSION: ${APP_VERSION:-dev}
+        COMMIT: ${APP_COMMIT:-none}

@@ -152,7 +152,9 @@ export function DashboardPage() {
           <CardHeader>
             <CardTitle>近 30 天趋势</CardTitle>
             <CardDescription>{metricLabels[metric]}按日汇总</CardDescription>
-            <CardAction>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="-mt-1 flex flex-wrap gap-2">
               <ToggleGroup
                 variant="outline"
                 size="sm"
@@ -168,9 +170,7 @@ export function DashboardPage() {
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
-            </CardAction>
-          </CardHeader>
-          <CardContent>
+            </div>
             {trend.isLoading ? (
               <Skeleton className="h-64 w-full" />
             ) : series.length === 0 ? (

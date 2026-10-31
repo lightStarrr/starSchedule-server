@@ -53,11 +53,12 @@ export function CommandMenu() {
       <Button
         variant="outline"
         size="sm"
-        className="w-40 justify-start gap-2 text-muted-foreground md:w-56"
+        aria-label="搜索页面"
+        className="w-8 justify-center gap-2 px-0 text-muted-foreground md:w-56 md:justify-start md:px-2.5"
         onClick={() => setOpen(true)}
       >
-        <SearchIcon data-icon="inline-start" />
-        <span className="truncate">搜索页面</span>
+        <SearchIcon />
+        <span className="hidden truncate md:inline">搜索页面</span>
         <kbd className="ml-auto hidden rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium md:inline-block">
           Ctrl K
         </kbd>

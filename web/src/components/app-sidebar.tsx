@@ -61,7 +61,7 @@ export function AppSidebar() {
               <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
                 <SparklesIcon />
               </div>
-              <div className="flex flex-col gap-0.5 leading-none">
+              <div className="flex flex-col gap-0.5 leading-none group-data-[collapsible=icon]:hidden">
                 <span className="font-medium">星课表</span>
                 <span className="text-xs text-muted-foreground">管理后台</span>
               </div>

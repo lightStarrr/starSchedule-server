@@ -14,6 +14,9 @@ tmp/
 web/node_modules/
 web/dist/
 web/.vite/
+# shadcn 官方 skill 的 CLI 安装副本（统一维护在 .workbuddy/skills/shadcn）
+web/.agents/
+web/.claude/
 
 # 前端构建输出（保留 .keep 以便 go:embed 始终有内容）
 /internal/webui/dist/*
@@ -28,3 +31,6 @@ Thumbs.db
 # 本地日志
 *.log
 coverage.*
+
+# 构建/工具临时文件
+_tmp_*

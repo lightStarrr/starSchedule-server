@@ -9,11 +9,11 @@ import (
 )
 
 type DayMetrics struct {
-	DAU        int64
-	Launches   int64
-	NewDevices int64
-	AIRequests int64
-	AITokens   int64
+	DAU        int64 `json:"dau"`
+	Launches   int64 `json:"launches"`
+	NewDevices int64 `json:"new_devices"`
+	AIRequests int64 `json:"ai_requests"`
+	AITokens   int64 `json:"ai_tokens"`
 }
 
 // ActiveDevicesBetween 统计区间内活跃设备数（跨日去重，WAU/MAU 用）。

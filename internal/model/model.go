@@ -48,18 +48,18 @@ type Device struct {
 func (d *Device) Banned() bool { return d.Status == DeviceStatusBanned }
 
 type LaunchEvent struct {
-	ID         uuid.UUID
-	DeviceID   uuid.UUID
-	StatDate   time.Time
-	OccurredAt time.Time
-	ReceivedAt time.Time
-	LaunchType string
-	Platform   string
-	AppVersion string
-	OSVersion  string
-	Arch       string
-	SessionID  string
-	Extra      map[string]any
+	ID         uuid.UUID      `json:"id"`
+	DeviceID   uuid.UUID      `json:"device_id"`
+	StatDate   time.Time      `json:"stat_date"`
+	OccurredAt time.Time      `json:"occurred_at"`
+	ReceivedAt time.Time      `json:"received_at"`
+	LaunchType string         `json:"launch_type"`
+	Platform   string         `json:"platform"`
+	AppVersion string         `json:"app_version"`
+	OSVersion  string         `json:"os_version"`
+	Arch       string         `json:"arch"`
+	SessionID  string         `json:"session_id"`
+	Extra      map[string]any `json:"extra,omitempty"`
 }
 
 type Provider struct {
@@ -114,15 +114,15 @@ type AdminUser struct {
 }
 
 type AuditLog struct {
-	ID            uuid.UUID
-	AdminID       *uuid.UUID
-	AdminUsername string
-	Action        string
-	TargetType    string
-	TargetID      string
-	Detail        map[string]any
-	IP            string
-	CreatedAt     time.Time
+	ID            uuid.UUID      `json:"id"`
+	AdminID       *uuid.UUID     `json:"admin_id,omitempty"`
+	AdminUsername string         `json:"admin_username"`
+	Action        string         `json:"action"`
+	TargetType    string         `json:"target_type"`
+	TargetID      string         `json:"target_id"`
+	Detail        map[string]any `json:"detail,omitempty"`
+	IP            string         `json:"ip"`
+	CreatedAt     time.Time      `json:"created_at"`
 }
 
 type DailyPoint struct {

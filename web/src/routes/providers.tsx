@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Card,
   CardContent,
@@ -78,6 +79,8 @@ export function ProvidersPage() {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<Provider | null>(null)
+  const [missing, setMissing] = useState<{ id: string; model_id: string; display_name: string }[]>([])
+  const [selected, setSelected] = useState<string[]>([])
 
   const providers = useQuery({
     queryKey: ['providers'],
@@ -147,11 +150,55 @@ export function ProvidersPage() {
 
   const sync = useMutation({
     mutationFn: (id: string) =>
-      api<{ synced: number }>(`/admin/ai/providers/${id}/sync-models`, { method: 'POST' }),
+      api<{ synced: number; missing: { id: string; model_id: string; display_name: string }[] }>(
+        `/admin/ai/providers/${id}/sync-models`,
+        { method: 'POST' },
+      ),
     onSuccess: (result) => {
-      toast.success(`已同步 ${result.synced} 个模型`)
       void queryClient.invalidateQueries({ queryKey: ['providers'] })
       void queryClient.invalidateQueries({ queryKey: ['models'] })
+      void queryClient.invalidateQueries({ queryKey: ['ai'] })
+      if (result.missing.length > 0) {
+        setMissing(result.missing)
+        setSelected(result.missing.map((item) => item.id))
+        toast.info(`同步完成，有 ${result.missing.length} 个模型上游已不再提供`)
+      } else {
+        toast.success(`已同步 ${result.synced} 个模型`)
+      }
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+
+  const bulkDelete = useMutation({
+    mutationFn: (ids: string[]) =>
+      api<{ deleted: number }>('/admin/ai/models/bulk-delete', { method: 'POST', body: { ids } }),
+    onSuccess: (result) => {
+      toast.success(`已删除 ${result.deleted} 个模型`)
+      setMissing([])
+      setSelected([])
+      void queryClient.invalidateQueries({ queryKey: ['models'] })
+      void queryClient.invalidateQueries({ queryKey: ['ai'] })
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+
+  // 卡片上的启停开关，直接带全量字段提交，避免把超时等配置覆盖成 0
+  const toggleProvider = useMutation({
+    mutationFn: (vars: { provider: Provider; enabled: boolean }) =>
+      api(`/admin/ai/providers/${vars.provider.id}`, {
+        method: 'PATCH',
+        body: {
+          name: vars.provider.name,
+          base_url: vars.provider.base_url,
+          timeout_seconds: vars.provider.timeout_seconds,
+          enabled: vars.enabled,
+        },
+      }),
+    onSuccess: (_data, vars) => {
+      toast.success(vars.enabled ? '供应商已启用' : '供应商已停用，其模型不再对客户端可见')
+      void queryClient.invalidateQueries({ queryKey: ['providers'] })
+      void queryClient.invalidateQueries({ queryKey: ['models'] })
+      void queryClient.invalidateQueries({ queryKey: ['ai'] })
     },
     onError: (error) => toast.error(errorMessage(error)),
   })
@@ -236,14 +283,6 @@ export function ProvidersPage() {
                     <FieldError>{form.formState.errors.timeout_seconds?.message}</FieldError>
                   </Field>
 
-                  <Field orientation="horizontal">
-                    <FieldLabel htmlFor="provider-enabled">启用</FieldLabel>
-                    <Switch
-                      id="provider-enabled"
-                      checked={form.watch('enabled')}
-                      onCheckedChange={(checked) => form.setValue('enabled', checked)}
-                    />
-                  </Field>
                 </FieldGroup>
 
                 <DialogFooter>
@@ -347,6 +386,19 @@ export function ProvidersPage() {
                       <PencilIcon data-icon="inline-start" />
                       编辑
                     </Button>
+                    <div className="flex items-center gap-2 pl-2">
+                      <Switch
+                        checked={provider.enabled}
+                        disabled={toggleProvider.isPending}
+                        onCheckedChange={(checked) =>
+                          toggleProvider.mutate({ provider, enabled: checked })
+                        }
+                        aria-label={`启用 ${provider.name}`}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {provider.enabled ? '启用' : '停用'}
+                      </span>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -354,6 +406,76 @@ export function ProvidersPage() {
           })}
         </div>
       )}
+
+      <Dialog
+        open={missing.length > 0}
+        onOpenChange={(next) => {
+          if (!next) {
+            setMissing([])
+            setSelected([])
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>有 {missing.length} 个模型上游已不再提供</DialogTitle>
+            <DialogDescription>
+              勾选需要删除的模型，默认全选。不删除的会继续保留在列表里，可以稍后手动处理。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-center justify-between">
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() =>
+                setSelected(selected.length === missing.length ? [] : missing.map((item) => item.id))
+              }
+            >
+              {selected.length === missing.length ? '取消全选' : '全选'}
+            </Button>
+            <span className="text-xs text-muted-foreground tabular-nums">
+              已选 {selected.length} / {missing.length}
+            </span>
+          </div>
+
+          <div className="flex max-h-64 flex-col gap-2 overflow-y-auto rounded-lg border p-3">
+            {missing.map((item) => (
+              <label key={item.id} className="flex items-center gap-2.5 text-sm">
+                <Checkbox
+                  checked={selected.includes(item.id)}
+                  onCheckedChange={(checked) =>
+                    setSelected((prev) =>
+                      checked ? [...prev, item.id] : prev.filter((value) => value !== item.id),
+                    )
+                  }
+                />
+                <span className="font-medium">{item.display_name || item.model_id}</span>
+                <span className="font-mono text-xs text-muted-foreground">{item.model_id}</span>
+              </label>
+            ))}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setMissing([])
+                setSelected([])
+              }}
+            >
+              保留
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={selected.length === 0 || bulkDelete.isPending}
+              onClick={() => bulkDelete.mutate(selected)}
+            >
+              {bulkDelete.isPending ? '删除中…' : `删除所选（${selected.length}）`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

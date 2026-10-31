@@ -294,27 +294,38 @@ func (c *AICatalog) TestProvider(ctx context.Context, id uuid.UUID) (bool, strin
 	return true, ""
 }
 
+// SyncResult 同步结果：写入/更新数量，以及本次上游返回的模型 ID 集合。
+type SyncResult struct {
+	Synced      int
+	UpstreamIDs map[string]bool
+}
+
 // SyncModels 拉取上游模型列表并 upsert。
-func (c *AICatalog) SyncModels(ctx context.Context, id uuid.UUID) (int, error) {
+func (c *AICatalog) SyncModels(ctx context.Context, id uuid.UUID) (SyncResult, error) {
 	p, err := c.store.GetProvider(ctx, id)
 	if err != nil {
-		return 0, err
+		return SyncResult{}, err
 	}
 	key, err := c.cipher.Decrypt(p.APIKeyCipher)
 	if err != nil {
-		return 0, err
+		return SyncResult{}, err
 	}
 	models, err := c.fetchModels(ctx, p.BaseURL, key, 20*time.Second)
 	if err != nil {
-		return 0, err
+		return SyncResult{}, err
 	}
 	n, err := c.store.UpsertFetchedModels(ctx, id, models)
 	if err != nil {
-		return 0, err
+		return SyncResult{}, err
 	}
 	_ = c.store.SetProviderCheck(ctx, id, true, "")
+
+	upstream := make(map[string]bool, len(models))
+	for _, m := range models {
+		upstream[m.ModelID] = true
+	}
 	c.Invalidate(ctx)
-	return n, nil
+	return SyncResult{Synced: n, UpstreamIDs: upstream}, nil
 }
 
 type upstreamModel struct {

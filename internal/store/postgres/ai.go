@@ -297,6 +297,7 @@ func (s *Store) ListAllModels(ctx context.Context) ([]model.CatalogEntry, error)
 		       m.enabled, m.source, m.fetched_at
 		FROM ai_provider_models m
 		JOIN ai_providers p ON p.id = m.provider_id
+		WHERE p.enabled
 		ORDER BY p.sort_order ASC, p.created_at ASC, m.model_id ASC`)
 	if err != nil {
 		return nil, err

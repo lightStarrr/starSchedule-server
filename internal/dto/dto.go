@@ -60,6 +60,10 @@ type ModelCreateRequest struct {
 	Enabled       *bool  `json:"enabled"`
 }
 
+type BulkDeleteModelsRequest struct {
+	IDs []string `json:"ids" binding:"required,min=1,max=500,dive,uuid"`
+}
+
 type ModelPatchRequest struct {
 	Alias         *string `json:"alias" binding:"omitempty,max=128"`
 	DisplayName   *string `json:"display_name" binding:"omitempty,max=128"`

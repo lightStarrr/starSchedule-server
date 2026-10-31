@@ -199,20 +199,32 @@ func (d *Deps) AdminSyncModels(c *gin.Context) {
 		respond.InvalidArgument(c, "供应商 ID 无效")
 		return
 	}
-	n, err := d.Catalog.SyncModels(c.Request.Context(), id)
+	res, err := d.Catalog.SyncModels(c.Request.Context(), id)
 	if err != nil {
 		d.Logger.Warn("同步模型失败", "error", err, "provider_id", id)
 		respond.Error(c, http.StatusBadGateway, respond.CodeUpstreamError, "同步失败："+err.Error(), nil)
 		return
 	}
+
 	models, _ := d.Store.ListModels(c.Request.Context(), id)
 	items := make([]gin.H, 0, len(models))
+	missing := make([]gin.H, 0)
 	for i := range models {
 		items = append(items, modelJSON(&models[i]))
+		// 只把「上游同步来的、这次没再出现」的模型列为待清理，手动添加的不动
+		if models[i].Source == "fetched" && !res.UpstreamIDs[models[i].ModelID] {
+			missing = append(missing, gin.H{
+				"id":           models[i].ID.String(),
+				"model_id":     models[i].ModelID,
+				"alias":        models[i].Alias,
+				"display_name": models[i].DisplayName,
+			})
+		}
 	}
+
 	d.Admin.Audit(c.Request.Context(), adminFromAny(c), "ai.models.sync", "provider", id.String(),
-		map[string]any{"synced": n}, c.ClientIP())
-	c.JSON(http.StatusOK, gin.H{"synced": n, "items": items})
+		map[string]any{"synced": res.Synced, "missing": len(missing)}, c.ClientIP())
+	c.JSON(http.StatusOK, gin.H{"synced": res.Synced, "items": items, "missing": missing})
 }
 
 // AdminActivateProvider POST /api/v1/admin/ai/providers/:id/activate
@@ -400,6 +412,29 @@ func (d *Deps) AdminUpdateModel(c *gin.Context) {
 	d.Catalog.Invalidate(c.Request.Context())
 	d.ensureDefaultModel(c.Request.Context(), m)
 	c.JSON(http.StatusOK, gin.H{"model": modelJSON(m)})
+}
+
+// AdminBulkDeleteModels POST /api/v1/admin/ai/models/bulk-delete
+func (d *Deps) AdminBulkDeleteModels(c *gin.Context) {
+	var req dto.BulkDeleteModelsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respond.InvalidArgument(c, "参数校验失败："+err.Error())
+		return
+	}
+	ctx := c.Request.Context()
+	deleted := 0
+	for _, raw := range req.IDs {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			continue
+		}
+		if err := d.Store.DeleteModel(ctx, id); err == nil {
+			deleted++
+		}
+	}
+	d.Catalog.Invalidate(ctx)
+	d.Admin.Audit(ctx, adminFromAny(c), "ai.models.delete", "model", "", map[string]any{"count": deleted}, c.ClientIP())
+	c.JSON(http.StatusOK, gin.H{"deleted": deleted})
 }
 
 // AdminDeleteModel DELETE /api/v1/admin/ai/models/:id

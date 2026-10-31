@@ -234,7 +234,7 @@ export function DashboardPage() {
               <CardTitle>AI 模型</CardTitle>
               <CardDescription>默认模型，客户端不指定时使用</CardDescription>
               <CardAction>
-                <Button variant="ghost" size="xs" render={<Link to="/ai/providers" />}>
+                <Button variant="ghost" size="xs" nativeButton={false} render={<Link to="/ai/providers" />}>
                   管理
                 </Button>
               </CardAction>
@@ -273,7 +273,7 @@ export function DashboardPage() {
                   <p className="text-sm text-muted-foreground">
                     尚未启用任何模型，客户端会隐藏 AI 入口。
                   </p>
-                  <Button size="sm" render={<Link to="/ai/providers" />}>
+                  <Button size="sm" nativeButton={false} render={<Link to="/ai/providers" />}>
                     去配置供应商
                   </Button>
                 </div>

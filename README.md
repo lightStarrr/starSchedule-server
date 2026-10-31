@@ -429,5 +429,6 @@ APP_IMAGE=ghcr.io/<name>/starschedule-server:1.2.2 docker compose up -d
 ```bash
 go test ./... -race      # 单元测试（token 估算、SSE 透传、JWT、AES）
 go vet ./...
+cd web && pnpm test      # 页面渲染冒烟测试（Vitest + jsdom，覆盖全部路由）
 cd web && pnpm exec tsc -b && pnpm build
 ```

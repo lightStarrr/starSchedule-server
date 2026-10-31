@@ -1,7 +1,7 @@
 import path from 'node:path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   // 与后端 /admin 静态路由一致
@@ -17,6 +17,12 @@ export default defineConfig({
     outDir: '../internal/webui/dist',
     emptyOutDir: false,
     sourcemap: false,
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
+    css: false,
   },
   server: {
     port: 5173,

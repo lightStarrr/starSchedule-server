@@ -50,6 +50,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: 类型检查
         run: pnpm exec tsc -b
+      - name: 页面渲染测试
+        run: pnpm test
       - name: 构建
         run: pnpm build
 

@@ -87,7 +87,7 @@ export function DeviceDetailPage() {
           <p className="text-sm text-muted-foreground">
             加载失败：{detail.error ? errorMessage(detail.error) : '设备不存在'}
           </p>
-          <Button variant="outline" size="sm" render={<Link to="/devices" />}>
+          <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/devices" />}>
             返回设备列表
           </Button>
         </CardContent>
@@ -108,7 +108,7 @@ export function DeviceDetailPage() {
         description={device.id}
         actions={
           <>
-            <Button variant="outline" size="sm" render={<Link to="/devices" />}>
+            <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/devices" />}>
               <ArrowLeftIcon data-icon="inline-start" />
               返回
             </Button>

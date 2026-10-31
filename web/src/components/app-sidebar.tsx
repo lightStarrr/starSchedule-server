@@ -59,7 +59,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" render={<NavLink to="/" />}>
               <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                <SparklesIcon />
+                <SparklesIcon className="size-4" aria-hidden />
               </div>
               <div className="flex flex-col gap-0.5 leading-none group-data-[collapsible=icon]:hidden">
                 <span className="font-medium">星课表</span>

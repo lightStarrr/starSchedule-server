@@ -246,7 +246,7 @@ export function DashboardPage() {
                 <>
                   <div className="flex items-center gap-2">
                     <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-                      <BotIcon />
+                      <BotIcon className="size-4" aria-hidden />
                     </div>
                     <div className="flex flex-col">
                       <span className="text-sm font-medium">{active.data.active.display_name}</span>

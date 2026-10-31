@@ -235,7 +235,7 @@ export function SettingsPage() {
           )}
         </CardContent>
         <CardFooter className="gap-2 text-xs text-muted-foreground">
-          <SettingsIcon />
+          <SettingsIcon className="size-3.5" aria-hidden />
           这些参数只影响新请求，不会改变历史统计数据。
         </CardFooter>
       </Card>

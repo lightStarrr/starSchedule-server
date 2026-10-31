@@ -62,7 +62,7 @@ export function LoginPage() {
       <Card className="relative w-full max-w-sm">
         <CardHeader>
           <div className="mb-2 flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <SparklesIcon />
+            <SparklesIcon className="size-5" aria-hidden />
           </div>
           <CardTitle>登录管理后台</CardTitle>
           <CardDescription>星课表运营与 AI 配置控制台</CardDescription>

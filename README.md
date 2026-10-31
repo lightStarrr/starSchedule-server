@@ -101,6 +101,17 @@ make web        # 只构建前端到 internal/webui/dist
 make build      # 前端 + 二进制
 ```
 
+图标尺寸约定（lucide 默认 24px，裸用会明显大于相邻文字）：
+
+| 场景 | 字号 | 图标 |
+| --- | --- | --- |
+| 表格单元格、指标卡标签、状态行 | `text-xs`（12px） | `size-3.5`（14px） |
+| 正文、按钮、导航项 | `text-sm`（14px） | `size-4`（16px） |
+| 卡片标题、品牌标 | `text-base` 及以上 | `size-5`（20px） |
+| 图标容器（如 32px 圆角块） | — | 容器 `size-8` + 图标 `size-4` |
+
+`Button`、`Badge`、`EmptyMedia`、`SidebarMenuButton` 等 shadcn 组件已内置图标尺寸，不用重复设置；纯装饰图标加 `aria-hidden`。
+
 开发时前后端分离：
 
 ```bash

@@ -337,9 +337,9 @@ export function ProvidersPage() {
                     <span className="text-muted-foreground">上次探活</span>
                     <span className="flex items-center gap-1.5 text-xs">
                       {provider.last_check_ok === true ? (
-                        <CheckCircle2Icon className="text-primary" />
+                        <CheckCircle2Icon className="size-3.5 text-primary" aria-hidden />
                       ) : provider.last_check_ok === false ? (
-                        <XCircleIcon className="text-destructive" />
+                        <XCircleIcon className="size-3.5 text-destructive" aria-hidden />
                       ) : null}
                       {provider.last_check_at ? formatDateTime(provider.last_check_at) : '未检测'}
                     </span>

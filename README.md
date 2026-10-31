@@ -137,13 +137,83 @@ cd web && pnpm dev        # 5173，/api 已代理到 8080
 
 配额与限流默认值可在「设置」页热改，修改后 30 秒内生效：每日 20 万 token / 设备、每分钟 20 次、并发 2。
 
-## 部署注意
+## 部署
 
-- 对外必须走 HTTPS（Android 9+ 默认禁止明文），可用 Caddy/Nginx 反代 8080。
-- `postgres` / `redis` 不对外暴露端口，仅容器网络内可达。
-- `api` 容器以只读根文件系统 + uid 10001 运行。
-- 数据库迁移由一次性 `migrate` 容器执行，成功后才启动 `api`。
-- 备份：`pgdata` 与 `redisdata` 两个卷；Redis 开了 AOF。
+### 必须设置的环境变量
+
+`.env` 与 `docker-compose.yml` 同级，`docker compose` 会自动读取。以下七项**必须改**，否则启动失败或存在安全风险：
+
+| 变量 | 作用 | 生成方式 |
+| --- | --- | --- |
+| `POSTGRES_PASSWORD` | 数据库密码 | `openssl rand -base64 24` |
+| `REDIS_PASSWORD` | Redis 密码（同时用于 `--requirepass`） | `openssl rand -base64 24` |
+| `DEVICE_JWT_SECRET` | 设备 token 签名密钥，≥32 字符 | `openssl rand -base64 48` |
+| `ADMIN_JWT_SECRET` | 后台 token 签名密钥，≥32 字符 | `openssl rand -base64 48` |
+| `DEVICE_FINGERPRINT_PEPPER` | `ANDROID_ID` 哈希盐值 | `openssl rand -base64 24` |
+| `APP_ENCRYPTION_KEY` | 加密上游 API Key，**必须是 base64 的 32 字节** | `openssl rand -base64 32` |
+| `ADMIN_PASSWORD` | 首次启动创建的后台管理员密码 | 自定 |
+
+注意两点：
+
+- `APP_ENCRYPTION_KEY` 一旦上线就不要再换，换掉后后台已保存的供应商密钥会解密失败，需要重新录入。
+- `ADMIN_PASSWORD` 只在 `admin_users` 为空时生效；之后改 env 不会修改已存在的密码。
+
+常用可选项：`HTTP_PORT`（对外端口，默认 8080）、`APP_TZ`（统计切日时区，默认 Asia/Shanghai）、`LOG_LEVEL`、`ADMIN_USERNAME`、`DB_MAX_CONNS`、`METRICS_ENABLED`、`DEVICE_TOKEN_TTL`。
+
+> `.env` 里的 `DATABASE_URL`、`REDIS_ADDR` 只在「不用 compose、直接跑二进制」时需要；compose 会用 `POSTGRES_*` 自动拼出连接串，并固定连 `redis:6379`。
+
+### 数据持久化
+
+默认用 Docker 命名卷，**不需要映射任何主机路径**：
+
+| 卷 | 容器内路径 | 内容 |
+| --- | --- | --- |
+| `pgdata` | `/var/lib/postgresql/data` | 全部业务数据（设备、启动事件、AI 用量等） |
+| `redisdata` | `/data` | AOF 文件（限流计数、配额、缓存） |
+
+`api` 是无状态服务：容器只读根文件系统，仅挂 `tmpfs: /tmp`，本身不需要持久化。
+
+如果希望数据落在主机目录（方便直接打包备份），用 override 文件改绑定挂载，不要改动主 compose：
+
+```yaml
+# docker-compose.override.yml（compose 会自动合并）
+services:
+  postgres:
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+  redis:
+    volumes:
+      - ./data/redis:/data
+```
+
+Linux 上要先授权，否则容器起不来：
+
+```bash
+mkdir -p data/postgres data/redis
+sudo chown -R 70:70 data/postgres     # postgres:alpine 的 uid/gid
+sudo chown -R 999:999 data/redis      # redis:alpine 的 uid/gid
+```
+
+备份也就变成：`pg_dump` 逻辑备份，或直接打包 `data/` 目录 / `pgdata` 卷。
+
+### 首次部署
+
+```bash
+cp .env.example .env
+vim .env                      # 按上表改七个必填项
+chmod 600 .env
+docker compose up -d --build
+curl http://127.0.0.1:8080/readyz    # {"ready":true,...}
+```
+
+浏览器打开 `http://<host>:8080/admin/`，用 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录，先配供应商再同步模型。
+
+### 其它注意
+
+- 对外必须走 HTTPS（Android 9+ 默认禁明文），可用 Caddy/Nginx 反代 8080，并透传 `X-Forwarded-Proto: https`。
+- `postgres` / `redis` 不映射端口，仅容器网络内可达；需要本机连库时临时加 `ports: ["127.0.0.1:5432:5432"]`。
+- 数据库迁移由一次性 `migrate` 容器执行，成功后才启动 `api`；升级时重复执行是幂等的。
+- `api` 内存上限 512M（compose `deploy.resources`），可按机器规格调整。
 
 ## 测试
 

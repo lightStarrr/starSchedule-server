@@ -69,7 +69,9 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
-  # 一次性迁移容器：成功退出后 api 才启动
+  # 一次性迁移容器：成功退出后 api 才启动。
+  # api 自身启动时也会跑迁移（带 advisory lock，多副本安全），
+  # 保留这一步是为了让「迁移失败」在 api 起来之前就暴露出来。
   migrate:
     image: ${APP_IMAGE:?set APP_IMAGE in .env, e.g. ghcr.io/your-name/starschedule-server:latest}
     command: ["/app/api", "-migrate-only"]

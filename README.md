@@ -200,6 +200,21 @@ services:
       - "127.0.0.1:8080:8080"
 ```
 
+### 没有 Compose 时手动创建容器
+
+某些面板（群晖 Container Manager、绿联、极空间等）只有「单容器创建」，那就建 **3 个容器**：
+
+| 容器 | 镜像 | 端口 | 挂载 | 重启 |
+| --- | --- | --- | --- | --- |
+| `postgres` | `postgres:16-alpine` | 不映射 | 卷 → `/var/lib/postgresql/data` | unless-stopped |
+| `redis` | `redis:7-alpine` | 不映射 | 卷 → `/data` | unless-stopped |
+| `api` | `ghcr.io/<owner>/starschedule-server:latest` | `8080:8080` | 无 | unless-stopped |
+
+- `migrate` 不用单独建：`api` 启动时会自动执行迁移（带 advisory lock，重复执行幂等）。
+- `redis` 的启动命令改成 `redis-server --appendonly yes --requirepass <密码>`。
+- 三个容器要放进**同一个自定义网络**，容器名分别设为 `postgres` 和 `redis`，否则 `DATABASE_URL` / `REDIS_ADDR` 里的主机名解析不到。
+- 环境变量清单与上一节相同，`api` 的环境变量直接照抄即可。
+
 ### 数据持久化
 
 默认用 Docker 命名卷，**不需要映射任何主机路径**：

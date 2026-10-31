@@ -55,7 +55,7 @@ import { Switch } from '@/components/ui/switch'
 import { PageHeader } from '@/components/page-header'
 import { api, errorMessage } from '@/lib/api'
 import { formatDateTime } from '@/lib/format'
-import type { ActiveAI, Provider } from '@/lib/types'
+import type { Provider } from '@/lib/types'
 
 const providerSchema = z.object({
   name: z.string().min(1, '请填写名称').max(64),
@@ -84,12 +84,7 @@ export function ProvidersPage() {
 
   const providers = useQuery({
     queryKey: ['providers'],
-    queryFn: () => api<{ items: Provider[]; active: ActiveAI | null }>('/admin/ai/providers'),
-  })
-
-  const active = useQuery({
-    queryKey: ['ai', 'active'],
-    queryFn: () => api<{ active: ActiveAI | null }>('/admin/ai/active'),
+    queryFn: () => api<{ items: Provider[] }>('/admin/ai/providers'),
   })
 
   const form = useForm<ProviderForm>({
@@ -204,7 +199,6 @@ export function ProvidersPage() {
   })
 
   const items = providers.data?.items ?? []
-  const activeProviderId = active.data?.active?.provider_id
 
   return (
     <>
@@ -323,13 +317,11 @@ export function ProvidersPage() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {items.map((provider) => {
-            const isActive = provider.id === activeProviderId
             return (
               <Card key={provider.id}>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     {provider.name}
-                    {isActive ? <Badge>使用中</Badge> : null}
                     {!provider.enabled ? <Badge variant="outline">已停用</Badge> : null}
                   </CardTitle>
                   <CardDescription className="truncate font-mono text-xs">

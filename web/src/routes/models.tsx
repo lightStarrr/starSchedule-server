@@ -114,6 +114,20 @@ export function ModelsPage() {
     onError: (error) => toast.error(errorMessage(error)),
   })
 
+  const setActive = useMutation({
+    mutationFn: (model: ModelInfo) =>
+      api('/admin/ai/active', {
+        method: 'PUT',
+        body: { provider_id: model.provider_id, model_id: model.id },
+      }),
+    onSuccess: () => {
+      toast.success('已切换当前模型，客户端下次拉取配置即生效')
+      void queryClient.invalidateQueries({ queryKey: ['models'] })
+      void queryClient.invalidateQueries({ queryKey: ['ai'] })
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+
   const remove = useMutation({
     mutationFn: (id: string) => api(`/admin/ai/models/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
@@ -131,7 +145,7 @@ export function ModelsPage() {
         title="模型"
         description={
           active.data?.active
-            ? `当前生效供应商：${active.data.active.provider_name}`
+            ? `启用表示该模型可被调用，可以有多个；「当前」只有一个，决定客户端实际使用的模型。当前：${active.data.active.alias}`
             : '先在「供应商」中启用一个模型，这里会展示其模型清单。'
         }
         actions={
@@ -231,6 +245,7 @@ export function ModelsPage() {
                   <TableHead className="hidden lg:table-cell text-right">上下文</TableHead>
                   <TableHead className="hidden sm:table-cell">来源</TableHead>
                   <TableHead className="text-center">启用</TableHead>
+                  <TableHead className="text-center">当前</TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
@@ -262,6 +277,20 @@ export function ModelsPage() {
                         }
                         aria-label={`启用 ${model.model_id}`}
                       />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {model.id === active.data?.active?.model_id ? (
+                        <Badge>当前</Badge>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          disabled={!model.enabled || setActive.isPending}
+                          onClick={() => setActive.mutate(model)}
+                        >
+                          设为当前
+                        </Button>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <Button

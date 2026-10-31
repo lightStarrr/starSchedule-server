@@ -50,6 +50,22 @@ func modelJSON(m *model.ProviderModel) gin.H {
 	}
 }
 
+// AdminCatalog GET /api/v1/admin/ai/catalog
+// 返回所有可调用的模型（供应商与模型都启用），以及当前生效的那个。
+func (d *Deps) AdminCatalog(c *gin.Context) {
+	ctx := c.Request.Context()
+	entries, err := d.Catalog.ListEnabled(ctx)
+	if err != nil {
+		respond.Internal(c, "查询模型失败")
+		return
+	}
+	current := gin.H{"id": "", "alias": ""}
+	if snap, err := d.Catalog.Snapshot(ctx); err == nil {
+		current = gin.H{"id": snap.ModelUUID.String(), "alias": snap.Alias}
+	}
+	c.JSON(http.StatusOK, gin.H{"items": entries, "active": current})
+}
+
 // AdminListProviders GET /api/v1/admin/ai/providers
 func (d *Deps) AdminListProviders(c *gin.Context) {
 	ctx := c.Request.Context()

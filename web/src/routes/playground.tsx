@@ -15,13 +15,21 @@ import {
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { PageHeader } from '@/components/page-header'
 import { api } from '@/lib/api'
 import { formatNumber } from '@/lib/format'
 import { streamPlayground, type ChatMessage } from '@/lib/stream'
-import type { ActiveAI } from '@/lib/types'
+import type { CatalogResponse } from '@/lib/types'
 
 interface Usage {
   prompt_tokens: number
@@ -31,10 +39,24 @@ interface Usage {
 }
 
 export function PlaygroundPage() {
-  const active = useQuery({
-    queryKey: ['ai', 'active'],
-    queryFn: () => api<{ active: ActiveAI | null }>('/admin/ai/active'),
+  const catalog = useQuery({
+    queryKey: ['ai', 'catalog'],
+    queryFn: () => api<CatalogResponse>('/admin/ai/catalog'),
   })
+
+  const items = catalog.data?.items ?? []
+  const [modelKey, setModelKey] = useState('')
+
+  // 默认选后台「当前启用」的模型，没有则取第一个可用的
+  useEffect(() => {
+    if (modelKey) return
+    const preferred = catalog.data?.active.alias
+    if (preferred && items.some((item) => item.alias === preferred)) {
+      setModelKey(preferred)
+    } else if (items.length > 0) {
+      setModelKey(items[0].alias)
+    }
+  }, [catalog.data, items, modelKey])
 
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -77,7 +99,7 @@ export function PlaygroundPage() {
 
     try {
       await streamPlayground(
-        { messages: nextMessages, temperature, max_tokens: maxTokens },
+        { messages: nextMessages, temperature, max_tokens: maxTokens, model: modelKey },
         {
           onDelta: (delta) => {
             text += delta
@@ -108,7 +130,8 @@ export function PlaygroundPage() {
     abortRef.current?.abort()
   }
 
-  const model = active.data?.active
+  const selected = items.find((item) => item.alias === modelKey)
+  const isActiveModel = catalog.data?.active.alias === modelKey
 
   return (
     <>
@@ -117,12 +140,13 @@ export function PlaygroundPage() {
         description="直接打当前启用的供应商与模型，用来验证密钥、模型与流式链路。不占用设备配额。"
         actions={
           <div className="flex items-center gap-2">
-            {model ? (
+            {selected ? (
               <>
-                <Badge variant="secondary">{model.display_name}</Badge>
+                <Badge variant="secondary">{selected.display_name}</Badge>
                 <Badge variant="outline" className="font-mono">
-                  {model.alias}
+                  {selected.alias}
                 </Badge>
+                {isActiveModel ? null : <Badge variant="outline">非当前</Badge>}
               </>
             ) : (
               <Badge variant="outline">未配置模型</Badge>
@@ -131,7 +155,7 @@ export function PlaygroundPage() {
         }
       />
 
-      {!model && !active.isLoading ? (
+      {items.length === 0 && !catalog.isLoading ? (
         <Alert>
           <WandSparklesIcon />
           <AlertTitle>还没有可用的模型</AlertTitle>
@@ -271,6 +295,31 @@ export function PlaygroundPage() {
             </CardHeader>
             <CardContent>
               <FieldGroup>
+                <Field>
+                  <FieldLabel>模型</FieldLabel>
+                  <Select
+                    value={modelKey}
+                    onValueChange={(value) => setModelKey(value ?? '')}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="选择模型" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {items.map((item) => (
+                          <SelectItem key={item.id} value={item.alias}>
+                            {item.display_name} · {item.provider_name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  <FieldDescription>
+                    客户端实际使用：
+                    {catalog.data?.active.alias || '未设置'}
+                  </FieldDescription>
+                </Field>
+
                 <Field>
                   <FieldLabel htmlFor="temperature">temperature</FieldLabel>
                   <Input

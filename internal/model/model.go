@@ -96,6 +96,17 @@ type ActiveAIConfig struct {
 	Model    ProviderModel
 }
 
+// CatalogEntry 是「可调用模型」的扁平视图，供后台选择器使用。
+type CatalogEntry struct {
+	ProviderID    uuid.UUID `json:"provider_id"`
+	ProviderName  string    `json:"provider_name"`
+	ModelUUID     uuid.UUID `json:"id"`
+	ModelID       string    `json:"model_id"`
+	Alias         string    `json:"alias"`
+	DisplayName   string    `json:"display_name"`
+	ContextWindow int       `json:"context_window"`
+}
+
 type UsageRow struct {
 	RequestCount     int64
 	ErrorCount       int64

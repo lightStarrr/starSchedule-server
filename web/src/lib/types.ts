@@ -123,6 +123,23 @@ export interface ActiveAI {
   context_window: number
 }
 
+/** 可调用模型的扁平视图（供应商与模型都启用） */
+export interface CatalogEntry {
+  provider_id: string
+  provider_name: string
+  id: string
+  model_id: string
+  alias: string
+  display_name: string
+  context_window: number
+}
+
+export interface CatalogResponse {
+  items: CatalogEntry[]
+  /** 当前对外生效的模型；未配置时 id / alias 为空串 */
+  active: { id: string; alias: string }
+}
+
 export interface UsageByDay {
   date: string
   request_count: number

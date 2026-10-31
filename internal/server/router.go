@@ -103,6 +103,7 @@ func NewRouter(d *handler.Deps, cfg *config.Config) *gin.Engine {
 	authed.POST("/ai/providers/:id/activate", d.AdminActivateProvider)
 
 	authed.GET("/ai/models", d.AdminListModels)
+	authed.GET("/ai/catalog", d.AdminCatalog)
 	authed.POST("/ai/models", d.AdminCreateModel)
 	authed.PATCH("/ai/models/:id", d.AdminUpdateModel)
 	authed.DELETE("/ai/models/:id", d.AdminDeleteModel)

@@ -136,6 +136,45 @@ func (c *AICatalog) EnabledModels(ctx context.Context) ([]model.ProviderModel, *
 	return out, p, nil
 }
 
+// ListEnabled 列出所有可调用的模型（供应商与模型都启用），供后台选择器使用。
+func (c *AICatalog) ListEnabled(ctx context.Context) ([]model.CatalogEntry, error) {
+	return c.store.ListEnabledCatalog(ctx)
+}
+
+// SnapshotByKey 按 alias 或上游 model_id 取指定模型的配置。
+// 仅用于后台试跑，客户端仍然只能走「当前启用」的组合。
+func (c *AICatalog) SnapshotByKey(ctx context.Context, key string) (*CatalogSnapshot, error) {
+	entries, err := c.store.ListEnabledCatalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range entries {
+		if e.Alias != key && e.ModelID != key {
+			continue
+		}
+		p, err := c.store.GetProvider(ctx, e.ProviderID)
+		if err != nil {
+			return nil, err
+		}
+		if !p.Enabled {
+			break
+		}
+		return &CatalogSnapshot{
+			ProviderID:     p.ID,
+			ProviderName:   p.Name,
+			BaseURL:        p.BaseURL,
+			APIKeyCipher:   p.APIKeyCipher,
+			TimeoutSeconds: p.TimeoutSeconds,
+			ModelUUID:      e.ModelUUID,
+			ModelID:        e.ModelID,
+			Alias:          e.Alias,
+			DisplayName:    e.DisplayName,
+			ContextWindow:  e.ContextWindow,
+		}, nil
+	}
+	return nil, ErrModelNotFound
+}
+
 // ---- 后台维护 ----
 
 type ProviderPayload struct {

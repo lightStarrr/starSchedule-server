@@ -142,6 +142,8 @@ type chatCaller struct {
 	Source     string
 	RateKey    string
 	ApplyQuota bool
+	// AllowModelOverride 仅后台试跑开启：允许请求体指定任意已启用模型。
+	AllowModelOverride bool
 }
 
 // AIChat POST /api/v1/ai/chat/completions
@@ -181,10 +183,11 @@ func (d *Deps) AIPlayground(c *gin.Context) {
 		rateKey = "admin:" + id.String()
 	}
 	d.handleChat(c, chatCaller{
-		AdminID:    adminID,
-		Source:     "playground",
-		RateKey:    rateKey,
-		ApplyQuota: false,
+		AdminID:            adminID,
+		Source:             "playground",
+		RateKey:            rateKey,
+		ApplyQuota:         false,
+		AllowModelOverride: true,
 	}, &req)
 }
 
@@ -198,17 +201,27 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 		return
 	}
 
-	snap, err := d.Catalog.Snapshot(ctx)
+	var snap *service.CatalogSnapshot
+	var err error
+	if caller.AllowModelOverride && req.Model != "" {
+		snap, err = d.Catalog.SnapshotByKey(ctx, req.Model)
+	} else {
+		snap, err = d.Catalog.Snapshot(ctx)
+	}
 	if err != nil {
-		if errors.Is(err, service.ErrAINotConfigured) {
+		switch {
+		case errors.Is(err, service.ErrAINotConfigured):
 			respond.Error(c, http.StatusServiceUnavailable, respond.CodeAINotConfigured,
 				"服务端尚未配置可用模型", nil)
-			return
+		case errors.Is(err, service.ErrModelNotFound):
+			respond.Error(c, http.StatusBadRequest, respond.CodeModelNotAvailable,
+				"指定的模型不可用，请重新获取配置", nil)
+		default:
+			respond.Internal(c, "读取模型配置失败")
 		}
-		respond.Internal(c, "读取模型配置失败")
 		return
 	}
-	if req.Model != "" && req.Model != snap.Alias && req.Model != snap.ModelID {
+	if !caller.AllowModelOverride && req.Model != "" && req.Model != snap.Alias && req.Model != snap.ModelID {
 		respond.Error(c, http.StatusBadRequest, respond.CodeModelNotAvailable,
 			"指定的模型不可用，请重新获取配置", nil)
 		return

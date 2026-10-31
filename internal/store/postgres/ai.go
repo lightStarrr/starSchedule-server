@@ -264,6 +264,30 @@ const (
 	keyActiveModel    = "ai.active_model"
 )
 
+// ListEnabledCatalog 返回所有「供应商与模型都启用」的条目，按供应商排序。
+func (s *Store) ListEnabledCatalog(ctx context.Context) ([]model.CatalogEntry, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT p.id, p.name, m.id, m.model_id, m.alias, m.display_name, m.context_window
+		FROM ai_provider_models m
+		JOIN ai_providers p ON p.id = m.provider_id
+		WHERE m.enabled AND p.enabled
+		ORDER BY p.sort_order ASC, p.created_at ASC, m.model_id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.CatalogEntry{}
+	for rows.Next() {
+		var e model.CatalogEntry
+		if err := rows.Scan(&e.ProviderID, &e.ProviderName, &e.ModelUUID, &e.ModelID,
+			&e.Alias, &e.DisplayName, &e.ContextWindow); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // GetActive 返回当前生效的供应商 + 模型；未配置时返回 store.ErrNotFound。
 func (s *Store) GetActive(ctx context.Context) (*model.ActiveAIConfig, error) {
 	raw, err := s.GetSettings(ctx)

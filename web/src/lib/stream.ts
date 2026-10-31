@@ -22,6 +22,8 @@ interface StreamBody {
   messages: ChatMessage[]
   temperature?: number
   max_tokens?: number
+  /** 指定模型 alias；不传则用后台「当前启用」的模型 */
+  model?: string
 }
 
 /** 用 fetch 读 SSE（EventSource 不支持 POST，也无法带 Cookie 之外的鉴权头）。 */

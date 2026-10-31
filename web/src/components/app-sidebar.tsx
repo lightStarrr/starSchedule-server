@@ -57,9 +57,14 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" render={<NavLink to="/" />}>
               <img
-                src={`${import.meta.env.BASE_URL}app-icon.webp`}
+                src={`${import.meta.env.BASE_URL}app-icon-light.svg`}
                 alt="星课表"
-                className="size-8 shrink-0 rounded-md"
+                className="size-8 shrink-0 rounded-md dark:hidden"
+              />
+              <img
+                src={`${import.meta.env.BASE_URL}app-icon-dark.svg`}
+                alt=""
+                className="hidden size-8 shrink-0 rounded-md dark:block"
               />
               <div className="flex flex-col gap-0.5 leading-none group-data-[collapsible=icon]:hidden">
                 <span className="font-medium">星课表</span>

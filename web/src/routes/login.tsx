@@ -61,9 +61,14 @@ export function LoginPage() {
       <Card className="relative w-full max-w-sm">
         <CardHeader>
           <img
-            src={`${import.meta.env.BASE_URL}app-icon.webp`}
+            src={`${import.meta.env.BASE_URL}app-icon-light.svg`}
             alt="星课表"
-            className="mb-2 size-10 rounded-lg"
+            className="mb-2 size-10 rounded-lg dark:hidden"
+          />
+          <img
+            src={`${import.meta.env.BASE_URL}app-icon-dark.svg`}
+            alt=""
+            className="mb-2 hidden size-10 rounded-lg dark:block"
           />
           <CardTitle>登录管理后台</CardTitle>
           <CardDescription>星课表运营与 AI 配置控制台</CardDescription>

@@ -105,6 +105,9 @@ type CatalogEntry struct {
 	Alias         string    `json:"alias"`
 	DisplayName   string    `json:"display_name"`
 	ContextWindow int       `json:"context_window"`
+	Enabled       bool      `json:"enabled"`
+	Source        string    `json:"source"`
+	FetchedAt     time.Time `json:"fetched_at"`
 }
 
 type UsageRow struct {

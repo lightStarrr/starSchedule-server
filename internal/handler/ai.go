@@ -18,39 +18,42 @@ import (
 )
 
 // Models GET /api/v1/ai/models
+// 返回所有已启用（供应商也启用）的模型，客户端可任选其一发起对话。
 func (d *Deps) AIModels(c *gin.Context) {
 	ctx := c.Request.Context()
-	snap, err := d.Catalog.Snapshot(ctx)
+	entries, err := d.Catalog.ListEnabled(ctx)
 	if err != nil {
-		if errors.Is(err, service.ErrAINotConfigured) {
-			respond.Error(c, http.StatusServiceUnavailable, respond.CodeAINotConfigured,
-				"服务端尚未配置可用模型", nil)
-			return
-		}
-		d.Logger.Error("读取模型配置失败", "error", err)
-		respond.Internal(c, "读取配置失败")
-		return
-	}
-	models, provider, err := d.Catalog.EnabledModels(ctx)
-	if err != nil {
+		d.Logger.Error("读取模型列表失败", "error", err)
 		respond.Internal(c, "读取模型列表失败")
 		return
 	}
+	if len(entries) == 0 {
+		respond.Error(c, http.StatusServiceUnavailable, respond.CodeAINotConfigured,
+			"服务端尚未配置可用模型", nil)
+		return
+	}
 
-	items := make([]gin.H, 0, len(models))
-	for _, m := range models {
+	// 默认模型：客户端不传 model 时使用，取后台当前配置
+	current := ""
+	if snap, err := d.Catalog.Snapshot(ctx); err == nil {
+		current = snap.Alias
+	}
+
+	items := make([]gin.H, 0, len(entries))
+	for _, e := range entries {
 		items = append(items, gin.H{
-			"alias":           m.Alias,
-			"display_name":    m.DisplayName,
-			"provider_name":   provider.Name,
-			"context_window":  m.ContextWindow,
+			"id":              e.ModelUUID.String(),
+			"alias":           e.Alias,
+			"display_name":    e.DisplayName,
+			"provider_name":   e.ProviderName,
+			"context_window":  e.ContextWindow,
 			"supports_stream": true,
-			"is_current":      m.ID == snap.ModelUUID,
+			"is_default":      e.Alias == current,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"items":       items,
-		"current":     snap.Alias,
+		"default":     current,
 		"server_time": serverNow(),
 	})
 }
@@ -160,10 +163,11 @@ func (d *Deps) AIChat(c *gin.Context) {
 	}
 	deviceID := dev.ID
 	d.handleChat(c, chatCaller{
-		DeviceID:   &deviceID,
-		Source:     "device",
-		RateKey:    "device:" + dev.ID.String(),
-		ApplyQuota: true,
+		DeviceID:           &deviceID,
+		Source:             "device",
+		RateKey:            "device:" + dev.ID.String(),
+		ApplyQuota:         true,
+		AllowModelOverride: true,
 	}, &req)
 }
 
@@ -204,7 +208,12 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 	var snap *service.CatalogSnapshot
 	var err error
 	if caller.AllowModelOverride && req.Model != "" {
-		snap, err = d.Catalog.SnapshotByKey(ctx, req.Model)
+		// UUID 精确匹配（同名模型可能出现在多个供应商下），否则回退按 alias 匹配
+		if id, perr := uuid.Parse(req.Model); perr == nil {
+			snap, err = d.Catalog.SnapshotByID(ctx, id)
+		} else {
+			snap, err = d.Catalog.SnapshotByKey(ctx, req.Model)
+		}
 	} else {
 		snap, err = d.Catalog.Snapshot(ctx)
 	}

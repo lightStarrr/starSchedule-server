@@ -104,6 +104,7 @@ export interface Provider {
 export interface ModelInfo {
   id: string
   provider_id: string
+  provider_name: string
   model_id: string
   alias: string
   display_name: string

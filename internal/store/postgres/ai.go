@@ -267,7 +267,8 @@ const (
 // ListEnabledCatalog 返回所有「供应商与模型都启用」的条目，按供应商排序。
 func (s *Store) ListEnabledCatalog(ctx context.Context) ([]model.CatalogEntry, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT p.id, p.name, m.id, m.model_id, m.alias, m.display_name, m.context_window
+		SELECT p.id, p.name, m.id, m.model_id, m.alias, m.display_name, m.context_window,
+		       m.source, m.fetched_at
 		FROM ai_provider_models m
 		JOIN ai_providers p ON p.id = m.provider_id
 		WHERE m.enabled AND p.enabled
@@ -280,7 +281,32 @@ func (s *Store) ListEnabledCatalog(ctx context.Context) ([]model.CatalogEntry, e
 	for rows.Next() {
 		var e model.CatalogEntry
 		if err := rows.Scan(&e.ProviderID, &e.ProviderName, &e.ModelUUID, &e.ModelID,
-			&e.Alias, &e.DisplayName, &e.ContextWindow); err != nil {
+			&e.Alias, &e.DisplayName, &e.ContextWindow, &e.Source, &e.FetchedAt); err != nil {
+			return nil, err
+		}
+		e.Enabled = true
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ListAllModels 返回所有模型（含未启用），附带供应商名，供后台列表使用。
+func (s *Store) ListAllModels(ctx context.Context) ([]model.CatalogEntry, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT p.id, p.name, m.id, m.model_id, m.alias, m.display_name, m.context_window,
+		       m.enabled, m.source, m.fetched_at
+		FROM ai_provider_models m
+		JOIN ai_providers p ON p.id = m.provider_id
+		ORDER BY p.sort_order ASC, p.created_at ASC, m.model_id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.CatalogEntry{}
+	for rows.Next() {
+		var e model.CatalogEntry
+		if err := rows.Scan(&e.ProviderID, &e.ProviderName, &e.ModelUUID, &e.ModelID,
+			&e.Alias, &e.DisplayName, &e.ContextWindow, &e.Enabled, &e.Source, &e.FetchedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

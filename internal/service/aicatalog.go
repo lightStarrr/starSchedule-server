@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -52,7 +53,8 @@ func NewAICatalog(st *postgres.Store, rd *redisc.Client, c *crypto.Cipher) *AICa
 func (c *AICatalog) Cipher() *crypto.Cipher { return c.cipher }
 func (c *AICatalog) Store() *postgres.Store { return c.store }
 
-// Snapshot 读取当前生效配置；未配置返回 ErrAINotConfigured。
+// Snapshot 返回「默认模型」配置：优先用后台指定的默认，其次回退到第一个已启用的模型。
+// 完全没配置时返回 ErrAINotConfigured。
 func (c *AICatalog) Snapshot(ctx context.Context) (*CatalogSnapshot, error) {
 	c.mu.Lock()
 	if c.cached != nil && time.Since(c.cachedAt) < 10*time.Second {
@@ -69,27 +71,87 @@ func (c *AICatalog) Snapshot(ctx context.Context) (*CatalogSnapshot, error) {
 	}
 
 	active, err := c.store.GetActive(ctx)
-	if err != nil {
-		if err == store.ErrNotFound {
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+
+	var snap *CatalogSnapshot
+	if err == nil {
+		snap = &CatalogSnapshot{
+			ProviderID:     active.Provider.ID,
+			ProviderName:   active.Provider.Name,
+			BaseURL:        active.Provider.BaseURL,
+			APIKeyCipher:   active.Provider.APIKeyCipher,
+			TimeoutSeconds: active.Provider.TimeoutSeconds,
+			ModelUUID:      active.Model.ID,
+			ModelID:        active.Model.ModelID,
+			Alias:          active.Model.Alias,
+			DisplayName:    active.Model.DisplayName,
+			ContextWindow:  active.Model.ContextWindow,
+		}
+	} else {
+		// 没有显式默认时，取第一个可用模型，避免用户必须先设置默认才能用
+		entries, lerr := c.store.ListEnabledCatalog(ctx)
+		if lerr != nil {
+			return nil, lerr
+		}
+		if len(entries) == 0 {
 			return nil, ErrAINotConfigured
+		}
+		snap, err = c.snapshotForEntry(ctx, entries[0])
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	_ = c.rd.SetJSON(ctx, redisc.KeyAIActive, snap, 60*time.Second)
+	c.storeInProcess(snap)
+	return snap, nil
+}
+
+// snapshotForEntry 把目录项补全成可用的转发配置。
+func (c *AICatalog) snapshotForEntry(ctx context.Context, e model.CatalogEntry) (*CatalogSnapshot, error) {
+	p, err := c.store.GetProvider(ctx, e.ProviderID)
+	if err != nil {
+		return nil, err
+	}
+	if !p.Enabled {
+		return nil, ErrModelNotFound
+	}
+	return &CatalogSnapshot{
+		ProviderID:     p.ID,
+		ProviderName:   p.Name,
+		BaseURL:        p.BaseURL,
+		APIKeyCipher:   p.APIKeyCipher,
+		TimeoutSeconds: p.TimeoutSeconds,
+		ModelUUID:      e.ModelUUID,
+		ModelID:        e.ModelID,
+		Alias:          e.Alias,
+		DisplayName:    e.DisplayName,
+		ContextWindow:  e.ContextWindow,
+	}, nil
+}
+
+// SnapshotByID 按模型主键解析配置，多个供应商存在同名模型时用它精确指定。
+func (c *AICatalog) SnapshotByID(ctx context.Context, id uuid.UUID) (*CatalogSnapshot, error) {
+	m, err := c.store.GetModel(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, ErrModelNotFound
 		}
 		return nil, err
 	}
-	snap := CatalogSnapshot{
-		ProviderID:     active.Provider.ID,
-		ProviderName:   active.Provider.Name,
-		BaseURL:        active.Provider.BaseURL,
-		APIKeyCipher:   active.Provider.APIKeyCipher,
-		TimeoutSeconds: active.Provider.TimeoutSeconds,
-		ModelUUID:      active.Model.ID,
-		ModelID:        active.Model.ModelID,
-		Alias:          active.Model.Alias,
-		DisplayName:    active.Model.DisplayName,
-		ContextWindow:  active.Model.ContextWindow,
+	if !m.Enabled {
+		return nil, ErrModelNotFound
 	}
-	_ = c.rd.SetJSON(ctx, redisc.KeyAIActive, snap, 60*time.Second)
-	c.storeInProcess(&snap)
-	return &snap, nil
+	return c.snapshotForEntry(ctx, model.CatalogEntry{
+		ProviderID:    m.ProviderID,
+		ModelUUID:     m.ID,
+		ModelID:       m.ModelID,
+		Alias:         m.Alias,
+		DisplayName:   m.DisplayName,
+		ContextWindow: m.ContextWindow,
+	})
 }
 
 func (c *AICatalog) storeInProcess(snap *CatalogSnapshot) {
@@ -111,29 +173,6 @@ func (c *AICatalog) Invalidate(ctx context.Context) {
 	c.cachedAt = time.Time{}
 	c.mu.Unlock()
 	_ = c.rd.Del(ctx, redisc.KeyAIActive, redisc.KeyAICatalog)
-}
-
-// EnabledModels 返回当前供应商下已启用的模型，供客户端选择/展示。
-func (c *AICatalog) EnabledModels(ctx context.Context) ([]model.ProviderModel, *model.Provider, error) {
-	snap, err := c.Snapshot(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	models, err := c.store.ListModels(ctx, snap.ProviderID)
-	if err != nil {
-		return nil, nil, err
-	}
-	out := make([]model.ProviderModel, 0, len(models))
-	for _, m := range models {
-		if m.Enabled {
-			out = append(out, m)
-		}
-	}
-	p, err := c.store.GetProvider(ctx, snap.ProviderID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return out, p, nil
 }
 
 // ListEnabled 列出所有可调用的模型（供应商与模型都启用），供后台选择器使用。

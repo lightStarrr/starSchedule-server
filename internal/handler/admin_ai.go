@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -64,6 +65,24 @@ func (d *Deps) AdminCatalog(c *gin.Context) {
 		current = gin.H{"id": snap.ModelUUID.String(), "alias": snap.Alias}
 	}
 	c.JSON(http.StatusOK, gin.H{"items": entries, "active": current})
+}
+
+// ensureDefaultModel 在没有默认模型时，把刚启用的模型设为默认，
+// 避免用户必须先手动点一次「设为默认」才能用。
+func (d *Deps) ensureDefaultModel(ctx context.Context, m *model.ProviderModel) {
+	if m == nil || !m.Enabled {
+		return
+	}
+	if _, err := d.Store.GetActive(ctx); err == nil {
+		return
+	}
+	p, err := d.Store.GetProvider(ctx, m.ProviderID)
+	if err != nil || !p.Enabled {
+		return
+	}
+	if err := d.Store.SetActive(ctx, m.ProviderID, m.ID); err == nil {
+		d.Catalog.Invalidate(ctx)
+	}
 }
 
 // AdminListProviders GET /api/v1/admin/ai/providers
@@ -299,28 +318,30 @@ func (d *Deps) AdminGetActive(c *gin.Context) {
 // AdminListModels GET /api/v1/admin/ai/models?provider_id=
 func (d *Deps) AdminListModels(c *gin.Context) {
 	ctx := c.Request.Context()
-	providerIDStr := c.Query("provider_id")
-	if providerIDStr == "" {
-		snap, err := d.Catalog.Snapshot(ctx)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"items": []any{}})
-			return
-		}
-		providerIDStr = snap.ProviderID.String()
-	}
-	providerID, err := uuid.Parse(providerIDStr)
-	if err != nil {
-		respond.InvalidArgument(c, "provider_id 无效")
-		return
-	}
-	models, err := d.Store.ListModels(ctx, providerID)
+	entries, err := d.Store.ListAllModels(ctx)
 	if err != nil {
 		respond.Internal(c, "查询模型失败")
 		return
 	}
-	items := make([]gin.H, 0, len(models))
-	for i := range models {
-		items = append(items, modelJSON(&models[i]))
+
+	filter := c.Query("provider_id")
+	items := make([]gin.H, 0, len(entries))
+	for _, e := range entries {
+		if filter != "" && e.ProviderID.String() != filter {
+			continue
+		}
+		items = append(items, gin.H{
+			"id":             e.ModelUUID.String(),
+			"provider_id":    e.ProviderID.String(),
+			"provider_name":  e.ProviderName,
+			"model_id":       e.ModelID,
+			"alias":          e.Alias,
+			"display_name":   e.DisplayName,
+			"context_window": e.ContextWindow,
+			"source":         e.Source,
+			"enabled":        e.Enabled,
+			"fetched_at":     e.FetchedAt,
+		})
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
@@ -346,6 +367,7 @@ func (d *Deps) AdminCreateModel(c *gin.Context) {
 		respond.Internal(c, "创建失败")
 		return
 	}
+	d.ensureDefaultModel(c.Request.Context(), m)
 	c.JSON(http.StatusOK, gin.H{"model": modelJSON(m)})
 }
 
@@ -376,6 +398,7 @@ func (d *Deps) AdminUpdateModel(c *gin.Context) {
 		return
 	}
 	d.Catalog.Invalidate(c.Request.Context())
+	d.ensureDefaultModel(c.Request.Context(), m)
 	c.JSON(http.StatusOK, gin.H{"model": modelJSON(m)})
 }
 

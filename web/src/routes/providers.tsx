@@ -11,7 +11,6 @@ import {
   PlugZapIcon,
   PlusIcon,
   RefreshCwIcon,
-  RocketIcon,
   XCircleIcon,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -153,17 +152,6 @@ export function ProvidersPage() {
       toast.success(`已同步 ${result.synced} 个模型`)
       void queryClient.invalidateQueries({ queryKey: ['providers'] })
       void queryClient.invalidateQueries({ queryKey: ['models'] })
-    },
-    onError: (error) => toast.error(errorMessage(error)),
-  })
-
-  const activate = useMutation({
-    mutationFn: (id: string) =>
-      api<{ active: { alias: string } }>(`/admin/ai/providers/${id}/activate`, { method: 'POST' }),
-    onSuccess: (result) => {
-      toast.success(`已启用模型 ${result.active.alias}`)
-      void queryClient.invalidateQueries({ queryKey: ['providers'] })
-      void queryClient.invalidateQueries({ queryKey: ['ai', 'active'] })
     },
     onError: (error) => toast.error(errorMessage(error)),
   })
@@ -349,15 +337,6 @@ export function ProvidersPage() {
                     >
                       <RefreshCwIcon data-icon="inline-start" />
                       同步模型
-                    </Button>
-                    <Button
-                      variant={isActive ? 'secondary' : 'default'}
-                      size="sm"
-                      disabled={activate.isPending || isActive}
-                      onClick={() => activate.mutate(provider.id)}
-                    >
-                      <RocketIcon data-icon="inline-start" />
-                      {isActive ? '已启用' : '设为启用'}
                     </Button>
                     <Button
                       variant="ghost"

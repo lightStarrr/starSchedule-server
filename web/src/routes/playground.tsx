@@ -50,11 +50,11 @@ export function PlaygroundPage() {
   // 默认选后台「当前启用」的模型，没有则取第一个可用的
   useEffect(() => {
     if (modelKey) return
-    const preferred = catalog.data?.active.alias
-    if (preferred && items.some((item) => item.alias === preferred)) {
+    const preferred = catalog.data?.active.id
+    if (preferred && items.some((item) => item.id === preferred)) {
       setModelKey(preferred)
     } else if (items.length > 0) {
-      setModelKey(items[0].alias)
+      setModelKey(items[0].id)
     }
   }, [catalog.data, items, modelKey])
 
@@ -130,8 +130,8 @@ export function PlaygroundPage() {
     abortRef.current?.abort()
   }
 
-  const selected = items.find((item) => item.alias === modelKey)
-  const isActiveModel = catalog.data?.active.alias === modelKey
+  const selected = items.find((item) => item.id === modelKey)
+  const isActiveModel = catalog.data?.active.id === modelKey
 
   return (
     <>
@@ -307,15 +307,15 @@ export function PlaygroundPage() {
                     <SelectContent>
                       <SelectGroup>
                         {items.map((item) => (
-                          <SelectItem key={item.id} value={item.alias}>
-                            {item.display_name} · {item.provider_name}
+                          <SelectItem key={item.id} value={item.id}>
+                            {item.display_name}（{item.provider_name}）
                           </SelectItem>
                         ))}
                       </SelectGroup>
                     </SelectContent>
                   </Select>
                   <FieldDescription>
-                    客户端实际使用：
+                    仅影响本次试跑；客户端默认使用
                     {catalog.data?.active.alias || '未设置'}
                   </FieldDescription>
                 </Field>

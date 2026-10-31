@@ -27,6 +27,14 @@ import {
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
@@ -41,9 +49,10 @@ import {
 import { PageHeader } from '@/components/page-header'
 import { api, errorMessage } from '@/lib/api'
 import { formatNumber } from '@/lib/format'
-import type { ActiveAI, ModelInfo } from '@/lib/types'
+import type { ModelInfo, Provider } from '@/lib/types'
 
 const modelSchema = z.object({
+  provider_id: z.string().min(1, '请选择供应商'),
   model_id: z.string().min(1, '请填写上游模型 ID').max(128),
   alias: z.string().max(128).optional(),
   display_name: z.string().max(128).optional(),
@@ -53,6 +62,7 @@ const modelSchema = z.object({
 type ModelForm = z.infer<typeof modelSchema>
 
 const defaults: ModelForm = {
+  provider_id: '',
   model_id: '',
   alias: '',
   display_name: '',
@@ -63,18 +73,14 @@ export function ModelsPage() {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
 
-  const active = useQuery({
-    queryKey: ['ai', 'active'],
-    queryFn: () => api<{ active: ActiveAI | null }>('/admin/ai/active'),
+  const providers = useQuery({
+    queryKey: ['providers'],
+    queryFn: () => api<{ items: Provider[] }>('/admin/ai/providers'),
   })
 
-  const providerId = active.data?.active?.provider_id
-
   const models = useQuery({
-    queryKey: ['models', providerId],
-    queryFn: () =>
-      api<{ items: ModelInfo[] }>(`/admin/ai/models?provider_id=${providerId ?? ''}`),
-    enabled: active.isFetched,
+    queryKey: ['models', 'all'],
+    queryFn: () => api<{ items: ModelInfo[] }>('/admin/ai/models'),
   })
 
   const form = useForm<ModelForm>({
@@ -87,7 +93,7 @@ export function ModelsPage() {
       api('/admin/ai/models', {
         method: 'POST',
         body: {
-          provider_id: providerId,
+          provider_id: values.provider_id,
           model_id: values.model_id.trim(),
           alias: values.alias?.trim() || values.model_id.trim(),
           display_name: values.display_name?.trim() || values.model_id.trim(),
@@ -100,6 +106,7 @@ export function ModelsPage() {
       setOpen(false)
       form.reset(defaults)
       void queryClient.invalidateQueries({ queryKey: ['models'] })
+      void queryClient.invalidateQueries({ queryKey: ['ai'] })
     },
     onError: (error) => toast.error(errorMessage(error)),
   })
@@ -108,20 +115,6 @@ export function ModelsPage() {
     mutationFn: (vars: { id: string; enabled: boolean }) =>
       api(`/admin/ai/models/${vars.id}`, { method: 'PATCH', body: { enabled: vars.enabled } }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['models'] })
-      void queryClient.invalidateQueries({ queryKey: ['ai', 'active'] })
-    },
-    onError: (error) => toast.error(errorMessage(error)),
-  })
-
-  const setActive = useMutation({
-    mutationFn: (model: ModelInfo) =>
-      api('/admin/ai/active', {
-        method: 'PUT',
-        body: { provider_id: model.provider_id, model_id: model.id },
-      }),
-    onSuccess: () => {
-      toast.success('已切换当前模型，客户端下次拉取配置即生效')
       void queryClient.invalidateQueries({ queryKey: ['models'] })
       void queryClient.invalidateQueries({ queryKey: ['ai'] })
     },
@@ -133,24 +126,40 @@ export function ModelsPage() {
     onSuccess: () => {
       toast.success('模型已删除')
       void queryClient.invalidateQueries({ queryKey: ['models'] })
+      void queryClient.invalidateQueries({ queryKey: ['ai'] })
     },
     onError: (error) => toast.error(errorMessage(error)),
   })
 
   const items = models.data?.items ?? []
+  const enabledCount = items.filter((item) => item.enabled).length
+  const providerItems = providers.data?.items ?? []
 
   return (
     <>
       <PageHeader
         title="模型"
         description={
-          active.data?.active
-            ? `启用表示该模型可被调用，可以有多个；「当前」只有一个，决定客户端实际使用的模型。当前：${active.data.active.alias}`
-            : '先在「供应商」中启用一个模型，这里会展示其模型清单。'
+          items.length > 0
+            ? `开关控制客户端能选用哪些模型，可同时开启多个（当前 ${enabledCount} / ${items.length}）。关闭后客户端立刻看不到该模型。`
+            : '先在「供应商」里同步模型，或在这里手动添加。'
         }
         actions={
           <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger render={<Button size="sm" disabled={!providerId} />}>
+            <DialogTrigger
+              render={
+                <Button
+                  size="sm"
+                  disabled={providerItems.length === 0}
+                  onClick={() => {
+                    form.reset({
+                      ...defaults,
+                      provider_id: providerItems[0]?.id ?? '',
+                    })
+                  }}
+                />
+              }
+            >
               <PlusIcon data-icon="inline-start" />
               手动添加
             </DialogTrigger>
@@ -158,7 +167,7 @@ export function ModelsPage() {
               <DialogHeader>
                 <DialogTitle>手动添加模型</DialogTitle>
                 <DialogDescription>
-                  上游 /models 没有返回、但实际可用的模型可以用这里补齐。
+                  上游 /models 没返回、但实际可用的模型可以用这里补齐。
                 </DialogDescription>
               </DialogHeader>
               <form
@@ -166,6 +175,28 @@ export function ModelsPage() {
                 className="flex flex-col gap-4"
               >
                 <FieldGroup>
+                  <Field data-invalid={Boolean(form.formState.errors.provider_id)}>
+                    <FieldLabel>供应商</FieldLabel>
+                    <Select
+                      value={form.watch('provider_id')}
+                      onValueChange={(value) => form.setValue('provider_id', value ?? '')}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="选择供应商" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {providerItems.map((provider) => (
+                            <SelectItem key={provider.id} value={provider.id}>
+                              {provider.name}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FieldError>{form.formState.errors.provider_id?.message}</FieldError>
+                  </Field>
+
                   <Field data-invalid={Boolean(form.formState.errors.model_id)}>
                     <FieldLabel htmlFor="model-id">模型 ID</FieldLabel>
                     <Input
@@ -174,17 +205,28 @@ export function ModelsPage() {
                       aria-invalid={Boolean(form.formState.errors.model_id)}
                       {...form.register('model_id')}
                     />
-                    <FieldDescription>上游请求体里的 model 字段原始值。</FieldDescription>
+                    <FieldDescription>上游请求体里 model 字段的原始值。</FieldDescription>
                     <FieldError>{form.formState.errors.model_id?.message}</FieldError>
                   </Field>
+
                   <Field>
                     <FieldLabel htmlFor="model-alias">别名</FieldLabel>
-                    <Input id="model-alias" placeholder="留空则与模型 ID 相同" {...form.register('alias')} />
+                    <Input
+                      id="model-alias"
+                      placeholder="留空则与模型 ID 相同"
+                      {...form.register('alias')}
+                    />
                   </Field>
+
                   <Field>
                     <FieldLabel htmlFor="model-display">展示名</FieldLabel>
-                    <Input id="model-display" placeholder="DeepSeek Chat" {...form.register('display_name')} />
+                    <Input
+                      id="model-display"
+                      placeholder="DeepSeek Chat"
+                      {...form.register('display_name')}
+                    />
                   </Field>
+
                   <Field>
                     <FieldLabel htmlFor="model-context">上下文长度</FieldLabel>
                     <Input
@@ -210,7 +252,7 @@ export function ModelsPage() {
       <Card className="overflow-hidden py-0">
         <CardHeader className="px-4 pt-4">
           <CardTitle>模型清单</CardTitle>
-          <CardDescription>只有启用的模型会下发给客户端</CardDescription>
+          <CardDescription>按供应商排序；开关即时生效</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           {models.isLoading ? (
@@ -241,11 +283,10 @@ export function ModelsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>模型</TableHead>
-                  <TableHead className="hidden md:table-cell">别名</TableHead>
+                  <TableHead className="hidden md:table-cell">供应商</TableHead>
                   <TableHead className="hidden lg:table-cell text-right">上下文</TableHead>
                   <TableHead className="hidden sm:table-cell">来源</TableHead>
-                  <TableHead className="text-center">启用</TableHead>
-                  <TableHead className="text-center">当前</TableHead>
+                  <TableHead className="text-center">可用</TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
@@ -255,13 +296,20 @@ export function ModelsPage() {
                     <TableCell>
                       <div className="flex flex-col gap-0.5">
                         <span className="font-medium">{model.display_name || model.model_id}</span>
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {model.model_id}
+                        <span className="flex items-center gap-2">
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {model.model_id}
+                          </span>
+                          {model.alias && model.alias !== model.model_id ? (
+                            <Badge variant="outline" className="font-mono">
+                              别名 {model.alias}
+                            </Badge>
+                          ) : null}
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="hidden md:table-cell font-mono text-xs">
-                      {model.alias}
+                    <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+                      {model.provider_name}
                     </TableCell>
                     <TableCell className="hidden lg:table-cell text-right tabular-nums">
                       {model.context_window ? formatNumber(model.context_window) : '—'}
@@ -277,20 +325,6 @@ export function ModelsPage() {
                         }
                         aria-label={`启用 ${model.model_id}`}
                       />
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {model.id === active.data?.active?.model_id ? (
-                        <Badge>当前</Badge>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="xs"
-                          disabled={!model.enabled || setActive.isPending}
-                          onClick={() => setActive.mutate(model)}
-                        >
-                          设为当前
-                        </Button>
-                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <Button

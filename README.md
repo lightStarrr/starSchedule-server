@@ -215,6 +215,19 @@ services:
 - 三个容器要放进**同一个自定义网络**，容器名分别设为 `postgres` 和 `redis`，否则 `DATABASE_URL` / `REDIS_ADDR` 里的主机名解析不到。
 - 环境变量清单与上一节相同，`api` 的环境变量直接照抄即可。
 
+### 一行命令部署（复用已有 PostgreSQL / Redis）
+
+服务器上已经有 PostgreSQL 和 Redis（1Panel / 宝塔 / 群晖等面板创建的容器）时，直接跑：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lightStarrr/starSchedule-server/master/deploy/install.sh -o /tmp/install.sh \
+  && sudo PG_PASSWORD=<PG密码> APP_IMAGE=ghcr.io/lightstarrr/starschedule-server:latest bash /tmp/install.sh
+```
+
+脚本会自动：探测 PG/Redis 容器并读取凭据 → 建库 → 生成密钥 → 拉镜像 → 启动容器 → 等健康检查 → 打印后台地址与管理员密码。可重复执行，已生成的密钥不会变。
+
+可选变量：`PG_CONTAINER`、`REDIS_CONTAINER`、`DB_NAME`、`HTTP_PORT`、`ADMIN_PASSWORD`、`REDIS_PASSWORD`。
+
 ### 使用已有的 PostgreSQL / Redis
 
 服务器上已经装了 PostgreSQL 和 Redis 时，别再用自带的容器，改用 `docker-compose.external.yml`——它只启动 `api`，通过 `host.docker.internal` 连宿主机。

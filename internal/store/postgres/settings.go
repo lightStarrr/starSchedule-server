@@ -56,7 +56,7 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 	return err
 }
 
-// rawToInt 兼容 123 与 "123" 两种写法。
+// rawToString 读取字符串设置项（如 ai.reasoning_effort）。
 func rawToString(raw json.RawMessage) (string, bool) {
 	if len(raw) == 0 {
 		return "", false
@@ -68,6 +68,7 @@ func rawToString(raw json.RawMessage) (string, bool) {
 	return v, true
 }
 
+// rawToInt 兼容 123 与 "123" 两种写法。
 func rawToInt(raw json.RawMessage) (int64, bool) {
 	if len(raw) == 0 {
 		return 0, false

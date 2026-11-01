@@ -40,12 +40,15 @@ func (d *Deps) providerJSON(p *model.Provider) gin.H {
 	}
 }
 
-// reasoningDefaultFor 只有可设置档位的模型才对外暴露默认值。
-func reasoningDefaultFor(mode, global string) string {
+// reasoningDefaultFor 返回该模型实际会下发的默认档位。
+//
+// 全局默认可能不在模型的档位子集里（例如全局 high、模型只有 low/medium）。
+// 这里与聊天侧共用同一支 clamp，保证「接口告诉客户端的值」就是「真正会发出去的值」。
+func reasoningDefaultFor(mode string, efforts []string, global string) string {
 	if mode != "effort" {
 		return ""
 	}
-	return global
+	return aiproxy.ClampReasoningEffort(global, efforts)
 }
 
 // reasoningJSON 是给客户端看的思考能力描述。
@@ -316,7 +319,12 @@ func (d *Deps) AdminListModels(c *gin.Context) {
 			"context_window": e.ContextWindow,
 			"source":         e.Source,
 			"enabled":        e.Enabled,
-			"fetched_at":     e.FetchedAt,
+			// 后台模型页的「思考」列与默认强度下拉都读这三个字段，
+			// 之前列表接口漏投影，导致页面恒显示「不支持」、下拉恒禁用
+			"reasoning_mode":    e.ReasoningMode,
+			"reasoning_efforts": e.ReasoningEfforts,
+			"reasoning_default": e.ReasoningDefault,
+			"fetched_at":        e.FetchedAt,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})

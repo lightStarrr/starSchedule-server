@@ -170,12 +170,14 @@ export type SettingKey =
   | 'ai.inflight_per_device'
   | 'ai.global_concurrency'
   | 'ai.max_output_tokens'
+  | 'ai.reasoning_effort'
   | 'device.register_per_ip_hour'
   | 'retention.launch_event_days'
   | 'retention.ai_log_days'
 
 export interface SettingsPayload {
-  overrides: Partial<Record<SettingKey, number>>
-  effective: Record<SettingKey, number>
-  defaults: Record<SettingKey, number>
+  // ai.reasoning_effort 是字符串枚举，其余键仍是数字
+  overrides: Partial<Record<SettingKey, number | string>>
+  effective: Record<SettingKey, number | string>
+  defaults: Record<SettingKey, number | string>
 }

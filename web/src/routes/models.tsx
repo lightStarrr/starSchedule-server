@@ -238,6 +238,16 @@ export function ModelsPage() {
   const globalEffort = String(settings.data?.effective?.['ai.reasoning_effort'] ?? '')
   const enabledGroups = groups.filter((group) => group.enabled)
   const defaultGroup = groups.find((group) => group.active.id === defaultModelId)
+  // 只有探测为 effort 的模型才谈得上档位；未检测/不支持时不要摆出四档让人以为能选
+  const defaultEfforts =
+    defaultGroup?.active.reasoning_mode === 'effort'
+      ? (defaultGroup.active.reasoning_efforts ?? [])
+      : []
+  // 全局值可能不在默认模型的档位子集里（后台允许），补进选项，否则下拉会显示空白
+  const effortOptions =
+    globalEffort && !defaultEfforts.includes(globalEffort)
+      ? [...defaultEfforts, globalEffort]
+      : defaultEfforts
   const enabledCount = groups.filter((group) => group.enabled).length
   const providerItems = (providers.data?.items ?? []).filter((provider) => provider.enabled)
 
@@ -288,9 +298,7 @@ export function ModelsPage() {
                 disabled={defaultGroup?.active.reasoning_mode !== 'effort' || setGlobalEffort.isPending}
                 items={[
                   { value: '__none__', label: '不指定' },
-                  ...(defaultGroup?.active.reasoning_efforts ?? ['minimal', 'low', 'medium', 'high']).map(
-                    (item) => ({ value: item, label: item }),
-                  ),
+                  ...effortOptions.map((item) => ({ value: item, label: item })),
                 ]}
               >
                 <SelectTrigger size="sm" className="w-32">
@@ -299,13 +307,11 @@ export function ModelsPage() {
                 <SelectContent>
                   <SelectGroup>
                     <SelectItem value="__none__">不指定</SelectItem>
-                    {(defaultGroup?.active.reasoning_efforts ?? ['minimal', 'low', 'medium', 'high']).map(
-                      (item) => (
-                        <SelectItem key={item} value={item}>
-                          {item}
-                        </SelectItem>
-                      ),
-                    )}
+                    {effortOptions.map((item) => (
+                      <SelectItem key={item} value={item}>
+                        {item}
+                      </SelectItem>
+                    ))}
                   </SelectGroup>
                 </SelectContent>
               </Select>

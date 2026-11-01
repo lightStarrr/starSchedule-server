@@ -54,7 +54,7 @@ func (d *Deps) AIModels(c *gin.Context) {
 			"supports_stream": true,
 			"is_default":      e.Alias == current,
 			"reasoning": reasoningJSON(e.ReasoningMode, e.ReasoningEfforts,
-				reasoningDefaultFor(e.ReasoningMode, settings.ReasoningEffort)),
+				reasoningDefaultFor(e.ReasoningMode, e.ReasoningEfforts, settings.ReasoningEffort)),
 		})
 	}
 	// ETag 只覆盖「内容」部分（不含 server_time），命中时返回 304，
@@ -120,7 +120,7 @@ func (d *Deps) AIConfig(c *gin.Context) {
 			"context_window":  snap.ContextWindow,
 			"supports_stream": true,
 			"reasoning": reasoningJSON(snap.ReasoningMode, snap.ReasoningEfforts,
-				reasoningDefaultFor(snap.ReasoningMode, settings.ReasoningEffort)),
+				reasoningDefaultFor(snap.ReasoningMode, snap.ReasoningEfforts, settings.ReasoningEffort)),
 		},
 		"limits": gin.H{
 			"rpm":               settings.RPMPerDevice,
@@ -293,14 +293,19 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 	reasoningEffort := ""
 	switch snap.ReasoningMode {
 	case "effort":
-		// 客户端没传就用全局默认档位；模型不支持该档位时不下发
-		reasoningEffort = req.ReasoningEffort
-		if reasoningEffort == "" {
-			reasoningEffort = settings.ReasoningEffort
-		}
-		if reasoningEffort != "" && len(snap.ReasoningEfforts) > 0 &&
-			!slices.Contains(snap.ReasoningEfforts, reasoningEffort) {
-			reasoningEffort = ""
+		if req.ReasoningEffort == "" {
+			// 没传就用全局默认，但必须收敛到本模型支持的档位：
+			// 直接下发越界值会被上游拒掉，静默丢弃又与 /ai/models 声称的默认值矛盾
+			reasoningEffort = aiproxy.ClampReasoningEffort(
+				settings.ReasoningEffort, snap.ReasoningEfforts,
+			)
+		} else if len(snap.ReasoningEfforts) > 0 &&
+			!slices.Contains(snap.ReasoningEfforts, req.ReasoningEffort) {
+			// 显式指定了本模型没有的档位：明确报错，不偷偷改档
+			respond.InvalidArgument(c, "该模型不支持所选思考强度")
+			return
+		} else {
+			reasoningEffort = req.ReasoningEffort
 		}
 	case "fixed":
 		if req.ReasoningEffort != "" {

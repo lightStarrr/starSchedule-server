@@ -60,6 +60,14 @@ type ModelCreateRequest struct {
 	Enabled       *bool  `json:"enabled"`
 }
 
+// ModelAvailabilityRequest 以「上游模型」为单位设置可用性：
+// 关闭 = 所有供应商下的该模型都不可用；开启 = 只保留指定供应商那一行可用。
+type ModelAvailabilityRequest struct {
+	ModelID    string  `json:"model_id" binding:"required,max=128"`
+	Enabled    bool    `json:"enabled"`
+	ProviderID *string `json:"provider_id"`
+}
+
 type BulkDeleteModelsRequest struct {
 	IDs []string `json:"ids" binding:"required,min=1,max=500,dive,uuid"`
 }

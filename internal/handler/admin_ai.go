@@ -15,6 +15,7 @@ import (
 	"github.com/starschedule/server/internal/model"
 	"github.com/starschedule/server/internal/respond"
 	"github.com/starschedule/server/internal/store"
+	"github.com/starschedule/server/internal/store/postgres"
 )
 
 func (d *Deps) providerJSON(p *model.Provider) gin.H {
@@ -272,6 +273,80 @@ func (d *Deps) AdminListModels(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+// AdminSetModelAvailability PUT /api/v1/admin/ai/models/availability
+// 以模型为单位启停：开启时只让指定供应商那一行可用，其余供应商的同名模型关闭。
+func (d *Deps) AdminSetModelAvailability(c *gin.Context) {
+	var req dto.ModelAvailabilityRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respond.InvalidArgument(c, "参数校验失败："+err.Error())
+		return
+	}
+	ctx := c.Request.Context()
+
+	rows, err := d.Store.ListModelsByModelID(ctx, req.ModelID)
+	if err != nil {
+		respond.Internal(c, "查询模型失败")
+		return
+	}
+	if len(rows) == 0 {
+		respond.NotFound(c, "模型不存在")
+		return
+	}
+
+	var target uuid.UUID
+	if req.Enabled {
+		switch {
+		case req.ProviderID != nil:
+			for _, r := range rows {
+				if r.ProviderID.String() == *req.ProviderID {
+					target = r.ProviderID
+					break
+				}
+			}
+			if target == uuid.Nil {
+				respond.InvalidArgument(c, "该供应商下没有这个模型")
+				return
+			}
+		default:
+			for _, r := range rows {
+				if r.Enabled {
+					target = r.ProviderID
+					break
+				}
+			}
+			if target == uuid.Nil {
+				target = rows[0].ProviderID
+			}
+		}
+		p, err := d.Store.GetProvider(ctx, target)
+		if err != nil || !p.Enabled {
+			respond.InvalidArgument(c, "该供应商已停用，请先启用供应商")
+			return
+		}
+	}
+
+	for _, r := range rows {
+		want := req.Enabled && r.ProviderID == target
+		if r.Enabled == want {
+			continue
+		}
+		enabled := want
+		if _, err := d.Store.UpdateModel(ctx, r.ID, postgres.ModelPatch{Enabled: &enabled}); err != nil {
+			respond.Internal(c, "更新模型失败")
+			return
+		}
+	}
+	d.Catalog.Invalidate(ctx)
+
+	providerID := ""
+	if target != uuid.Nil {
+		providerID = target.String()
+	}
+	d.Admin.Audit(ctx, adminFromAny(c), "ai.models.availability", "model", req.ModelID,
+		map[string]any{"enabled": req.Enabled, "provider_id": providerID}, c.ClientIP())
+	c.JSON(http.StatusOK, gin.H{"model_id": req.ModelID, "enabled": req.Enabled, "provider_id": providerID})
 }
 
 // AdminCreateModel POST /api/v1/admin/ai/models

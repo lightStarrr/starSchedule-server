@@ -290,6 +290,25 @@ func (s *Store) ListEnabledCatalog(ctx context.Context) ([]model.CatalogEntry, e
 	return out, rows.Err()
 }
 
+// ListModelsByModelID 返回同一上游模型在各供应商下的全部记录。
+func (s *Store) ListModelsByModelID(ctx context.Context, modelID string) ([]model.ProviderModel, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+modelColumns+` FROM ai_provider_models
+		WHERE model_id = $1 ORDER BY created_at ASC`, modelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.ProviderModel{}
+	for rows.Next() {
+		m, err := scanModel(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *m)
+	}
+	return out, rows.Err()
+}
+
 // ListAllModels 返回所有模型（含未启用），附带供应商名，供后台列表使用。
 func (s *Store) ListAllModels(ctx context.Context) ([]model.CatalogEntry, error) {
 	rows, err := s.pool.Query(ctx, `

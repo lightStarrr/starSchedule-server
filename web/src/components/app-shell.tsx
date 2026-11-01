@@ -99,7 +99,8 @@ export function AppShell() {
       <SidebarProvider>
         <AppSidebar />
         <SidebarInset>
-          <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+          {/* 顶栏吸顶：滚动内容时保持可见，半透明 + 模糊避免内容穿透 */}
+          <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80">
             <SidebarTrigger className="-ml-1" />
             {/* 手机上顶栏空间紧张，分隔线只在 md 以上保留 */}
             <Separator

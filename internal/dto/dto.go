@@ -60,6 +60,11 @@ type ModelCreateRequest struct {
 	Enabled       *bool  `json:"enabled"`
 }
 
+// SetDefaultModelRequest 指定客户端不传 model 时使用的默认模型。
+type SetDefaultModelRequest struct {
+	ModelID string `json:"model_id" binding:"required,uuid"`
+}
+
 // ModelAvailabilityRequest 以「上游模型」为单位设置可用性：
 // 关闭 = 所有供应商下的该模型都不可用；开启 = 只保留指定供应商那一行可用。
 type ModelAvailabilityRequest struct {

@@ -219,6 +219,11 @@ describe('管理后台页面渲染', () => {
     expect(await screen.findByText('DeepSeek Chat（deepseek）')).toBeInTheDocument()
   })
 
+  it('模型页给默认模型打标', async () => {
+    renderAt('/ai/models')
+    expect(await screen.findByText('默认')).toBeInTheDocument()
+  })
+
   it('模型页展示供应商与模型 ID', async () => {
     renderAt('/ai/models')
     expect(await screen.findByText('DeepSeek Chat')).toBeInTheDocument()

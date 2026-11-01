@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { z } from 'zod'
 import { toast } from 'sonner'
 import { Link } from 'react-router'
-import { CpuIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import { CpuIcon, MoreHorizontalIcon, PlusIcon, StarIcon, Trash2Icon } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,6 +34,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -59,7 +66,7 @@ import {
 import { PageHeader } from '@/components/page-header'
 import { api, errorMessage } from '@/lib/api'
 import { formatNumber } from '@/lib/format'
-import type { ModelInfo, Provider } from '@/lib/types'
+import type { ActiveAI, ModelInfo, Provider } from '@/lib/types'
 
 const modelSchema = z.object({
   provider_id: z.string().min(1, '请选择供应商'),
@@ -101,6 +108,11 @@ export function ModelsPage() {
   const models = useQuery({
     queryKey: ['models', 'all'],
     queryFn: () => api<{ items: ModelInfo[] }>('/admin/ai/models'),
+  })
+
+  const active = useQuery({
+    queryKey: ['ai', 'active'],
+    queryFn: () => api<{ active: ActiveAI | null }>('/admin/ai/active'),
   })
 
   const form = useForm<ModelForm>({
@@ -146,6 +158,16 @@ export function ModelsPage() {
     onError: (error) => toast.error(errorMessage(error)),
   })
 
+  const setDefault = useMutation({
+    mutationFn: (modelId: string) =>
+      api('/admin/ai/models/default', { method: 'PUT', body: { model_id: modelId } }),
+    onSuccess: () => {
+      toast.success('已设为默认模型')
+      invalidate()
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+
   const remove = useMutation({
     mutationFn: (ids: string[]) =>
       api<{ deleted: number }>('/admin/ai/models/bulk-delete', { method: 'POST', body: { ids } }),
@@ -172,6 +194,7 @@ export function ModelsPage() {
       .sort((a, b) => a.modelId.localeCompare(b.modelId))
   }, [models.data])
 
+  const defaultModelId = active.data?.active?.model_id ?? ''
   const enabledCount = groups.filter((group) => group.enabled).length
   const providerItems = (providers.data?.items ?? []).filter((provider) => provider.enabled)
 
@@ -341,8 +364,13 @@ export function ModelsPage() {
                   <TableRow key={group.modelId}>
                     <TableCell>
                       <div className="flex flex-col gap-0.5">
-                        <span className="font-medium">
-                          {group.active.display_name || group.modelId}
+                        <span className="flex items-center gap-2">
+                          <span className="font-medium">
+                            {group.active.display_name || group.modelId}
+                          </span>
+                          {group.active.id === defaultModelId ? (
+                            <Badge variant="secondary">默认</Badge>
+                          ) : null}
                         </span>
                         <span className="flex items-center gap-2">
                           <span className="font-mono text-xs text-muted-foreground">
@@ -408,14 +436,34 @@ export function ModelsPage() {
                       />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="删除模型"
-                        onClick={() => setPendingDelete(group)}
-                      >
-                        <Trash2Icon />
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label="更多操作"
+                              disabled={setDefault.isPending}
+                            >
+                              <MoreHorizontalIcon />
+                            </Button>
+                          }
+                        />
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            disabled={!group.enabled || group.active.id === defaultModelId}
+                            onClick={() => setDefault.mutate(group.active.id)}
+                          >
+                            <StarIcon />
+                            {group.active.id === defaultModelId ? '已是默认模型' : '设为默认'}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem variant="destructive" onClick={() => setPendingDelete(group)}>
+                            <Trash2Icon />
+                            删除
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}

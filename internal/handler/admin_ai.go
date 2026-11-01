@@ -273,6 +273,52 @@ func (d *Deps) AdminListModels(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
+// AdminSetDefaultModel PUT /api/v1/admin/ai/models/default
+// 把某个已启用的模型设为默认模型（客户端不传 model 时使用）。
+func (d *Deps) AdminSetDefaultModel(c *gin.Context) {
+	var req dto.SetDefaultModelRequest
+	if !respond.BindJSON(c, &req) {
+		return
+	}
+	ctx := c.Request.Context()
+
+	id, err := uuid.Parse(req.ModelID)
+	if err != nil {
+		respond.InvalidArgument(c, "模型 ID 无效")
+		return
+	}
+	m, err := d.Store.GetModel(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			respond.NotFound(c, "模型不存在")
+			return
+		}
+		respond.Internal(c, "查询模型失败")
+		return
+	}
+	if !m.Enabled {
+		respond.InvalidArgument(c, "模型未启用，无法设为默认")
+		return
+	}
+	p, err := d.Store.GetProvider(ctx, m.ProviderID)
+	if err != nil || !p.Enabled {
+		respond.InvalidArgument(c, "所属供应商已停用，无法设为默认")
+		return
+	}
+	if err := d.Store.SetActive(ctx, m.ProviderID, m.ID); err != nil {
+		respond.Internal(c, "设置默认模型失败")
+		return
+	}
+	d.Catalog.Invalidate(ctx)
+	d.Admin.Audit(ctx, adminFromAny(c), "ai.models.set_default", "model", m.ID.String(),
+		map[string]any{"alias": m.Alias, "provider_id": m.ProviderID.String()}, c.ClientIP())
+	c.JSON(http.StatusOK, gin.H{
+		"model_id":    m.ID.String(),
+		"provider_id": m.ProviderID.String(),
+		"alias":       m.Alias,
+	})
+}
+
 // AdminSetModelAvailability PUT /api/v1/admin/ai/models/availability
 // 以模型为单位启停：开启时只让指定供应商那一行可用，其余供应商的同名模型关闭。
 func (d *Deps) AdminSetModelAvailability(c *gin.Context) {

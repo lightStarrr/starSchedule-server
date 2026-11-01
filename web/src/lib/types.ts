@@ -175,9 +175,17 @@ export type SettingKey =
   | 'retention.launch_event_days'
   | 'retention.ai_log_days'
 
+// 与后端 handler.settingKeys 对齐：只有 ai.reasoning_effort 是字符串枚举，其余都是 int。
+export type StringSettingKey = 'ai.reasoning_effort'
+export type NumericSettingKey = Exclude<SettingKey, StringSettingKey>
+
+// 逐键推导值类型。写成 Record<SettingKey, number | string> 会把所有值都拓宽成联合类型，
+// 导致读 ai.daily_token_quota 这类纯数值键时也拿不到 number。
+export type SettingValue<K extends SettingKey> = K extends StringSettingKey ? string : number
+export type SettingMap = { [K in SettingKey]: SettingValue<K> }
+
 export interface SettingsPayload {
-  // ai.reasoning_effort 是字符串枚举，其余键仍是数字
-  overrides: Partial<Record<SettingKey, number | string>>
-  effective: Record<SettingKey, number | string>
-  defaults: Record<SettingKey, number | string>
+  overrides: Partial<SettingMap>
+  effective: SettingMap
+  defaults: SettingMap
 }

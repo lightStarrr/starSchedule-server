@@ -21,7 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { PageHeader } from '@/components/page-header'
 import { api, errorMessage } from '@/lib/api'
-import type { SettingKey, SettingsPayload } from '@/lib/types'
+import type { NumericSettingKey, SettingsPayload } from '@/lib/types'
 
 const schema = z.object({
   dailyTokenQuota: z.number().int().min(0),
@@ -38,7 +38,8 @@ type SettingsForm = z.infer<typeof schema>
 
 const fields: {
   name: keyof SettingsForm
-  key: SettingKey
+  // 这里只承载数值型配置；ai.reasoning_effort 是字符串枚举，在模型页单独维护。
+  key: NumericSettingKey
   label: string
   description: string
 }[] = [

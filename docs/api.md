@@ -7,6 +7,7 @@
 - **无信封**：成功直接返回业务对象，失败 `{error:{...}}`
 - **列表**：分页列表为 `{items, next_cursor, has_more, total_estimate?}`；`/ai/models` 不是分页列表，结构见第 6 节
 - **幂等**：注册按 `install_id`，启动上报按 `session_id`，重试必须复用同一值
+- **请求体上限**：所有 JSON 接口 1 MiB，超出返回 `413 PAYLOAD_TOO_LARGE`（`/ai/chat/completions` 另加 messages ≤131072 字节）
 
 ## 1. 请求头
 
@@ -22,8 +23,9 @@
 | `X-Request-Id` | 响应 | 是 | 与请求一致或服务端生成，报错时展示给用户便于排查 |
 | `X-Server-Time` | 响应 | 是 | 服务端 UTC 时间，用于时钟校正 |
 | `X-Refresh-Token` | 响应 | 条件 | token 剩余 <7 天时出现，客户端静默替换本地 token |
-| `X-RateLimit-Limit` / `-Remaining` / `-Reset` | 响应 | 条件 | 被限流接口返回，`Reset` 为 Unix 秒 |
-| `Retry-After` | 响应 | 条件 | 429 时建议等待秒数 |
+| `X-RateLimit-Limit` | 响应 | 条件 | 挂了限流中间件的接口**每次请求**都返回，表示该接口的额度 |
+| `X-RateLimit-Remaining` / `-Reset` | 响应 | 仅 429 | 剩余为 0；`Reset` 为 Unix 秒。正常 200 里没有这两个头 |
+| `Retry-After` | 响应 | 仅 429 | 建议等待秒数 |
 
 ## 2. 统一错误体
 
@@ -88,7 +90,8 @@
 - 同 `install_id` 重复注册 → 同一 `device_id`、新 token、`is_new=false`
 - 限流：同 `install_id` 5 次/分，同 IP 60 次/时（后台可改）
 - **静默重注册必须单飞**：多个请求同时 401 时只允许一个去注册，其余等待结果复用，否则会撞上 5 次/分的限制把自己限成 429
-- 错误：`400 INVALID_ARGUMENT` / `403 DEVICE_BANNED` / `429 RATE_LIMITED` / `500 INTERNAL`
+- 错误：`400 INVALID_ARGUMENT` / `403 DEVICE_BANNED` / `413 PAYLOAD_TOO_LARGE` / `429 RATE_LIMITED` / `500 INTERNAL`
+- 正常注册体只有几百字节；收到 `413` 说明请求被构造错了（例如把整个日志塞进字段），按「上报数据异常」处理即可
 
 ## 4. GET /devices/me
 
@@ -134,7 +137,7 @@
 | 其余 | — | 否 | 缺失时取设备档案值 |
 | `extra` | object | 否 | 预留扩展，≤1KB |
 
-响应：`204 No Content`。重复上报同样 204。
+响应：`204 No Content`。重复上报同样 204。请求体超过 1 MiB 返回 `413 PAYLOAD_TOO_LARGE`（`extra` 建议 ≤1KB，正常不会触发）。
 
 ## 6. GET /ai/models
 

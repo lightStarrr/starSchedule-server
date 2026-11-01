@@ -1,6 +1,7 @@
 package aiproxy
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -29,10 +30,19 @@ func TestBuildUpstreamKeepsExplicitTemperature(t *testing.T) {
 	}
 }
 
-// 超过输入字节上限时返回固定文案，handler 依赖它判断 413。
+// 超过输入字节上限时返回 ErrInputTooLarge，handler 依赖 errors.Is 判断 413。
 func TestValidateInputTooLarge(t *testing.T) {
 	req := &ChatRequest{Messages: []Message{{Role: "user", Content: strings.Repeat("x", 64)}}}
-	if msg := req.Validate(4096, 16); msg != MsgInputTooLarge {
-		t.Fatalf("期望 %q，实际 %q", MsgInputTooLarge, msg)
+	if err := req.Validate(4096, 16); !errors.Is(err, ErrInputTooLarge) {
+		t.Fatalf("期望 ErrInputTooLarge，实际 %v", err)
+	}
+}
+
+// 其它校验失败不能误判成 413。
+func TestValidateRejectsEmptyMessages(t *testing.T) {
+	req := &ChatRequest{}
+	err := req.Validate(4096, 16)
+	if err == nil || errors.Is(err, ErrInputTooLarge) {
+		t.Fatalf("空 messages 应返回普通错误，实际 %v", err)
 	}
 }

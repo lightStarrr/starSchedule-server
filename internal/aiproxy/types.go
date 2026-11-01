@@ -2,6 +2,7 @@
 package aiproxy
 
 import (
+	"errors"
 	"strings"
 	"unicode"
 )
@@ -80,46 +81,47 @@ type streamChunk struct {
 // DefaultTemperature 客户端不传时使用的温度，避免上游默认值各不相同。
 const DefaultTemperature = 0.7
 
-// MsgInputTooLarge 是 messages 超限时的固定文案，handler 据此返回 413。
-const MsgInputTooLarge = "messages 内容过长，请精简上下文"
+// ErrInputTooLarge 表示 messages 超过字节上限。
+// handler 用 errors.Is 判断并返回 413，避免靠文案相等来分支。
+var ErrInputTooLarge = errors.New("messages 内容过长，请精简上下文")
 
-// Validate 做服务端侧校验，返回中文错误信息。
-func (r *ChatRequest) Validate(maxOutput int, maxInputBytes int) string {
+// Validate 做服务端侧校验，返回的错误信息可直接展示给用户。
+func (r *ChatRequest) Validate(maxOutput int, maxInputBytes int) error {
 	if len(r.Messages) == 0 {
-		return "messages 不能为空"
+		return errors.New("messages 不能为空")
 	}
 	if len(r.Messages) > 100 {
-		return "messages 最多 100 条"
+		return errors.New("messages 最多 100 条")
 	}
 	total := 0
 	for _, m := range r.Messages {
 		switch m.Role {
 		case "system", "user", "assistant":
 		default:
-			return "messages.role 只能是 system/user/assistant"
+			return errors.New("messages.role 只能是 system/user/assistant")
 		}
 		if strings.TrimSpace(m.Content) == "" {
-			return "messages.content 不能为空"
+			return errors.New("messages.content 不能为空")
 		}
 		total += len(m.Content)
 	}
 	if total > maxInputBytes {
-		return MsgInputTooLarge
+		return ErrInputTooLarge
 	}
 	if r.Temperature != nil && (*r.Temperature < 0 || *r.Temperature > 2) {
-		return "temperature 必须在 0–2 之间"
+		return errors.New("temperature 必须在 0–2 之间")
 	}
 	if r.TopP != nil && (*r.TopP < 0 || *r.TopP > 1) {
-		return "top_p 必须在 0–1 之间"
+		return errors.New("top_p 必须在 0–1 之间")
 	}
 	if len(r.Stop) > 4 {
-		return "stop 最多 4 条"
+		return errors.New("stop 最多 4 条")
 	}
 	if r.MaxTokens != nil && *r.MaxTokens < 1 {
-		return "max_tokens 必须大于 0"
+		return errors.New("max_tokens 必须大于 0")
 	}
 	_ = maxOutput
-	return ""
+	return nil
 }
 
 // BuildUpstream 组装上游请求体，max_tokens 由服务端截断。

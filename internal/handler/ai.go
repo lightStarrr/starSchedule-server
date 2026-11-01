@@ -224,13 +224,13 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 
 	settings := d.Settings.Get(ctx)
 	const maxInputBytes = 131072
-	if msg := req.Validate(settings.MaxOutputTokens, maxInputBytes); msg != "" {
-		if msg == aiproxy.MsgInputTooLarge {
+	if err := req.Validate(settings.MaxOutputTokens, maxInputBytes); err != nil {
+		if errors.Is(err, aiproxy.ErrInputTooLarge) {
 			respond.Error(c, http.StatusRequestEntityTooLarge, respond.CodePayloadTooLarge,
-				msg, map[string]any{"max_input_bytes": maxInputBytes})
+				err.Error(), map[string]any{"max_input_bytes": maxInputBytes})
 			return
 		}
-		respond.InvalidArgument(c, msg)
+		respond.InvalidArgument(c, err.Error())
 		return
 	}
 

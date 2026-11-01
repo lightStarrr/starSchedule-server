@@ -57,15 +57,15 @@ func TestBuildUpstreamTruncatesMaxTokens(t *testing.T) {
 func TestValidate(t *testing.T) {
 	mt := 0
 	bad := ChatRequest{Messages: []Message{{Role: "user", Content: "hi"}}, MaxTokens: &mt}
-	if msg := bad.Validate(4096, 1024); msg == "" {
+	if err := bad.Validate(4096, 1024); err == nil {
 		t.Fatal("max_tokens=0 应该校验失败")
 	}
 	ok := ChatRequest{Messages: []Message{{Role: "user", Content: "hi"}}}
-	if msg := ok.Validate(4096, 1024); msg != "" {
-		t.Fatalf("合法请求被拒绝: %s", msg)
+	if err := ok.Validate(4096, 1024); err != nil {
+		t.Fatalf("合法请求被拒绝: %v", err)
 	}
 	role := ChatRequest{Messages: []Message{{Role: "tool", Content: "x"}}}
-	if msg := role.Validate(4096, 1024); msg == "" {
+	if err := role.Validate(4096, 1024); err == nil {
 		t.Fatal("非法 role 应该校验失败")
 	}
 }

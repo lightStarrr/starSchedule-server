@@ -214,6 +214,11 @@ describe('管理后台页面渲染', () => {
     }
   })
 
+  it('试跑页模型下拉显示名称与供应商，而不是 ID', async () => {
+    renderAt('/ai/playground')
+    expect(await screen.findByText('DeepSeek Chat（deepseek）')).toBeInTheDocument()
+  })
+
   it('模型页展示供应商与模型 ID', async () => {
     renderAt('/ai/models')
     expect(await screen.findByText('DeepSeek Chat')).toBeInTheDocument()

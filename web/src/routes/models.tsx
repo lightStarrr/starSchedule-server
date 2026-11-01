@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -6,6 +6,16 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { Link } from 'react-router'
 import { CpuIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -69,9 +79,19 @@ const defaults: ModelForm = {
   context_window: 65536,
 }
 
+/** 同一个上游模型可能被多家供应商提供，按 model_id 归并成一行。 */
+interface ModelGroup {
+  modelId: string
+  rows: ModelInfo[]
+  /** 当前生效的那行；全关时取第一行用于展示 */
+  active: ModelInfo
+  enabled: boolean
+}
+
 export function ModelsPage() {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<ModelGroup | null>(null)
 
   const providers = useQuery({
     queryKey: ['providers'],
@@ -87,6 +107,11 @@ export function ModelsPage() {
     resolver: zodResolver(modelSchema),
     defaultValues: defaults,
   })
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['models'] })
+    void queryClient.invalidateQueries({ queryKey: ['ai'] })
+  }
 
   const create = useMutation({
     mutationFn: (values: ModelForm) =>
@@ -105,35 +130,49 @@ export function ModelsPage() {
       toast.success('模型已添加')
       setOpen(false)
       form.reset(defaults)
-      void queryClient.invalidateQueries({ queryKey: ['models'] })
-      void queryClient.invalidateQueries({ queryKey: ['ai'] })
+      invalidate()
     },
     onError: (error) => toast.error(errorMessage(error)),
   })
 
-  const toggle = useMutation({
-    mutationFn: (vars: { id: string; enabled: boolean }) =>
-      api(`/admin/ai/models/${vars.id}`, { method: 'PATCH', body: { enabled: vars.enabled } }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['models'] })
-      void queryClient.invalidateQueries({ queryKey: ['ai'] })
-    },
+  // 以模型为单位启停 / 切换供应商
+  const setAvailability = useMutation({
+    mutationFn: (vars: { modelId: string; enabled: boolean; providerId?: string }) =>
+      api('/admin/ai/models/availability', {
+        method: 'PUT',
+        body: { model_id: vars.modelId, enabled: vars.enabled, provider_id: vars.providerId },
+      }),
+    onSuccess: invalidate,
     onError: (error) => toast.error(errorMessage(error)),
   })
 
   const remove = useMutation({
-    mutationFn: (id: string) => api(`/admin/ai/models/${id}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      toast.success('模型已删除')
-      void queryClient.invalidateQueries({ queryKey: ['models'] })
-      void queryClient.invalidateQueries({ queryKey: ['ai'] })
+    mutationFn: (ids: string[]) =>
+      api<{ deleted: number }>('/admin/ai/models/bulk-delete', { method: 'POST', body: { ids } }),
+    onSuccess: (result) => {
+      toast.success(`已删除 ${result.deleted} 条模型记录`)
+      setPendingDelete(null)
+      invalidate()
     },
     onError: (error) => toast.error(errorMessage(error)),
   })
 
-  const items = models.data?.items ?? []
-  const enabledCount = items.filter((item) => item.enabled).length
-  // 停用的供应商不参与模型管理，避免加完看不见
+  const groups = useMemo<ModelGroup[]>(() => {
+    const map = new Map<string, ModelInfo[]>()
+    for (const item of models.data?.items ?? []) {
+      const list = map.get(item.model_id)
+      if (list) list.push(item)
+      else map.set(item.model_id, [item])
+    }
+    return [...map.entries()]
+      .map(([modelId, rows]) => {
+        const active = rows.find((row) => row.enabled) ?? rows[0]
+        return { modelId, rows, active, enabled: rows.some((row) => row.enabled) }
+      })
+      .sort((a, b) => a.modelId.localeCompare(b.modelId))
+  }, [models.data])
+
+  const enabledCount = groups.filter((group) => group.enabled).length
   const providerItems = (providers.data?.items ?? []).filter((provider) => provider.enabled)
 
   return (
@@ -141,8 +180,8 @@ export function ModelsPage() {
       <PageHeader
         title="模型"
         description={
-          items.length > 0
-            ? `开关控制客户端能选用哪些模型，可同时开启多个（当前 ${enabledCount} / ${items.length}）。关闭后客户端立刻看不到该模型。`
+          groups.length > 0
+            ? `一个模型一行，开关控制客户端能否使用；同一个模型被多家供应商提供时，用供应商下拉切换走哪家。当前可用 ${enabledCount} / ${groups.length}。`
             : '先在「供应商」里同步模型，或在这里手动添加。'
         }
         actions={
@@ -181,6 +220,10 @@ export function ModelsPage() {
                     <Select
                       value={form.watch('provider_id')}
                       onValueChange={(value) => form.setValue('provider_id', value ?? '')}
+                      items={providerItems.map((provider) => ({
+                        value: provider.id,
+                        label: provider.name,
+                      }))}
                     >
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="选择供应商" />
@@ -206,7 +249,9 @@ export function ModelsPage() {
                       aria-invalid={Boolean(form.formState.errors.model_id)}
                       {...form.register('model_id')}
                     />
-                    <FieldDescription>上游请求体里 model 字段的原始值。</FieldDescription>
+                    <FieldDescription>
+                      上游请求体里 model 字段的原始值；如果别的供应商也有同名模型，会自动合并成一行。
+                    </FieldDescription>
                     <FieldError>{form.formState.errors.model_id?.message}</FieldError>
                   </Field>
 
@@ -253,7 +298,7 @@ export function ModelsPage() {
       <Card className="overflow-hidden py-0">
         <CardHeader className="px-4 pt-4">
           <CardTitle>模型清单</CardTitle>
-          <CardDescription>按供应商排序；开关即时生效</CardDescription>
+          <CardDescription>同一模型出现在多家供应商时合并展示，开关与供应商切换即时生效</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           {models.isLoading ? (
@@ -262,7 +307,7 @@ export function ModelsPage() {
                 <Skeleton key={index} className="h-10 w-full" />
               ))}
             </div>
-          ) : items.length === 0 ? (
+          ) : groups.length === 0 ? (
             <Empty className="border-0">
               <EmptyHeader>
                 <EmptyMedia variant="icon">
@@ -284,7 +329,7 @@ export function ModelsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>模型</TableHead>
-                  <TableHead className="hidden md:table-cell">供应商</TableHead>
+                  <TableHead>供应商</TableHead>
                   <TableHead className="hidden lg:table-cell text-right">上下文</TableHead>
                   <TableHead className="hidden sm:table-cell">来源</TableHead>
                   <TableHead className="text-center">可用</TableHead>
@@ -292,39 +337,74 @@ export function ModelsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {items.map((model) => (
-                  <TableRow key={model.id}>
+                {groups.map((group) => (
+                  <TableRow key={group.modelId}>
                     <TableCell>
                       <div className="flex flex-col gap-0.5">
-                        <span className="font-medium">{model.display_name || model.model_id}</span>
+                        <span className="font-medium">
+                          {group.active.display_name || group.modelId}
+                        </span>
                         <span className="flex items-center gap-2">
                           <span className="font-mono text-xs text-muted-foreground">
-                            {model.model_id}
+                            {group.modelId}
                           </span>
-                          {model.alias && model.alias !== model.model_id ? (
-                            <Badge variant="outline" className="font-mono">
-                              别名 {model.alias}
-                            </Badge>
+                          {group.rows.length > 1 ? (
+                            <Badge variant="outline">{group.rows.length} 家提供</Badge>
                           ) : null}
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
-                      {model.provider_name}
+                    <TableCell>
+                      {group.rows.length > 1 ? (
+                        <Select
+                          value={group.active.provider_id}
+                          onValueChange={(value) =>
+                            setAvailability.mutate({
+                              modelId: group.modelId,
+                              enabled: true,
+                              providerId: value ?? undefined,
+                            })
+                          }
+                          items={group.rows.map((row) => ({
+                            value: row.provider_id,
+                            label: row.provider_name,
+                          }))}
+                        >
+                          <SelectTrigger size="sm" className="w-36">
+                            <SelectValue className="truncate" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              {group.rows.map((row) => (
+                                <SelectItem key={row.id} value={row.provider_id}>
+                                  {row.provider_name}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">
+                          {group.active.provider_name}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="hidden lg:table-cell text-right tabular-nums">
-                      {model.context_window ? formatNumber(model.context_window) : '—'}
+                      {group.active.context_window ? formatNumber(group.active.context_window) : '—'}
                     </TableCell>
                     <TableCell className="hidden sm:table-cell">
-                      <Badge variant="outline">{model.source === 'manual' ? '手动' : '同步'}</Badge>
+                      <Badge variant="outline">
+                        {group.active.source === 'manual' ? '手动' : '同步'}
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-center">
                       <Switch
-                        checked={model.enabled}
+                        checked={group.enabled}
+                        disabled={setAvailability.isPending}
                         onCheckedChange={(checked) =>
-                          toggle.mutate({ id: model.id, enabled: checked })
+                          setAvailability.mutate({ modelId: group.modelId, enabled: checked })
                         }
-                        aria-label={`启用 ${model.model_id}`}
+                        aria-label={`启用 ${group.modelId}`}
                       />
                     </TableCell>
                     <TableCell className="text-right">
@@ -332,8 +412,7 @@ export function ModelsPage() {
                         variant="ghost"
                         size="icon-sm"
                         aria-label="删除模型"
-                        disabled={remove.isPending}
-                        onClick={() => remove.mutate(model.id)}
+                        onClick={() => setPendingDelete(group)}
                       >
                         <Trash2Icon />
                       </Button>
@@ -345,6 +424,34 @@ export function ModelsPage() {
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingDelete(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除模型「{pendingDelete?.modelId}」？</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete && pendingDelete.rows.length > 1
+                ? `该模型在 ${pendingDelete.rows.length} 家供应商下都有记录，会一并删除。`
+                : '删除后需要重新同步或手动添加才能恢复。'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingDelete) remove.mutate(pendingDelete.rows.map((row) => row.id))
+              }}
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

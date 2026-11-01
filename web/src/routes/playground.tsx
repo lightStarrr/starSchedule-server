@@ -137,29 +137,12 @@ export function PlaygroundPage() {
     }
   }, [items, modelKey])
 
-  const selected = items.find((item) => item.id === modelKey)
-  const isActiveModel = catalog.data?.active.id === modelKey
 
   return (
     <>
       <PageHeader
         title="AI 试跑"
-        description="直接打当前启用的供应商与模型，用来验证密钥、模型与流式链路。不占用设备配额。"
-        actions={
-          <div className="flex items-center gap-2">
-            {selected ? (
-              <>
-                <Badge variant="secondary">{selected.display_name}</Badge>
-                <Badge variant="outline" className="font-mono">
-                  {selected.alias}
-                </Badge>
-                {isActiveModel ? null : <Badge variant="outline">非默认</Badge>}
-              </>
-            ) : (
-              <Badge variant="outline">未配置模型</Badge>
-            )}
-          </div>
-        }
+        description="选定模型直接打对应供应商，用来验证密钥、模型与流式链路。不占用设备配额。"
       />
 
       {items.length === 0 && !catalog.isLoading ? (
@@ -307,6 +290,10 @@ export function PlaygroundPage() {
                   <Select
                     value={modelKey}
                     onValueChange={(value) => setModelKey(value ?? '')}
+                    items={items.map((item) => ({
+                      value: item.id,
+                      label: `${item.display_name}（${item.provider_name}）`,
+                    }))}
                   >
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="选择模型" />

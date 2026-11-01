@@ -101,6 +101,8 @@ export interface Provider {
   created_at: string
 }
 
+export type ReasoningMode = 'unknown' | 'none' | 'effort' | 'fixed'
+
 export interface ModelInfo {
   id: string
   provider_id: string
@@ -111,6 +113,9 @@ export interface ModelInfo {
   context_window: number
   source: 'fetched' | 'manual'
   enabled: boolean
+  reasoning_mode: ReasoningMode
+  reasoning_efforts: string[] | null
+  reasoning_default: string
   fetched_at: string
 }
 
@@ -133,6 +138,9 @@ export interface CatalogEntry {
   alias: string
   display_name: string
   context_window: number
+  reasoning_mode: ReasoningMode
+  reasoning_efforts: string[] | null
+  reasoning_default: string
 }
 
 export interface CatalogResponse {

@@ -23,16 +23,19 @@ import (
 // CatalogSnapshot 是转发链路需要的完整配置快照，整体缓存以支撑高频读取。
 // APIKeyCipher 仍是密文，落 Redis 也安全。
 type CatalogSnapshot struct {
-	ProviderID     uuid.UUID `json:"provider_id"`
-	ProviderName   string    `json:"provider_name"`
-	BaseURL        string    `json:"base_url"`
-	APIKeyCipher   []byte    `json:"api_key_cipher"`
-	TimeoutSeconds int       `json:"timeout_seconds"`
-	ModelUUID      uuid.UUID `json:"model_uuid"`
-	ModelID        string    `json:"model_id"`
-	Alias          string    `json:"alias"`
-	DisplayName    string    `json:"display_name"`
-	ContextWindow  int       `json:"context_window"`
+	ProviderID       uuid.UUID `json:"provider_id"`
+	ProviderName     string    `json:"provider_name"`
+	BaseURL          string    `json:"base_url"`
+	APIKeyCipher     []byte    `json:"api_key_cipher"`
+	TimeoutSeconds   int       `json:"timeout_seconds"`
+	ModelUUID        uuid.UUID `json:"model_uuid"`
+	ModelID          string    `json:"model_id"`
+	Alias            string    `json:"alias"`
+	DisplayName      string    `json:"display_name"`
+	ContextWindow    int       `json:"context_window"`
+	ReasoningMode    string    `json:"reasoning_mode"`
+	ReasoningEfforts []string  `json:"reasoning_efforts"`
+	ReasoningDefault string    `json:"reasoning_default"`
 }
 
 // AICatalog 管理供应商与模型，并把「当前生效配置」缓存在 Redis。
@@ -77,16 +80,19 @@ func (c *AICatalog) Snapshot(ctx context.Context) (*CatalogSnapshot, error) {
 	var snap *CatalogSnapshot
 	if err == nil {
 		snap = &CatalogSnapshot{
-			ProviderID:     active.Provider.ID,
-			ProviderName:   active.Provider.Name,
-			BaseURL:        active.Provider.BaseURL,
-			APIKeyCipher:   active.Provider.APIKeyCipher,
-			TimeoutSeconds: active.Provider.TimeoutSeconds,
-			ModelUUID:      active.Model.ID,
-			ModelID:        active.Model.ModelID,
-			Alias:          active.Model.Alias,
-			DisplayName:    active.Model.DisplayName,
-			ContextWindow:  active.Model.ContextWindow,
+			ProviderID:       active.Provider.ID,
+			ProviderName:     active.Provider.Name,
+			BaseURL:          active.Provider.BaseURL,
+			APIKeyCipher:     active.Provider.APIKeyCipher,
+			TimeoutSeconds:   active.Provider.TimeoutSeconds,
+			ModelUUID:        active.Model.ID,
+			ModelID:          active.Model.ModelID,
+			Alias:            active.Model.Alias,
+			DisplayName:      active.Model.DisplayName,
+			ContextWindow:    active.Model.ContextWindow,
+			ReasoningMode:    active.Model.ReasoningMode,
+			ReasoningEfforts: active.Model.ReasoningEfforts,
+			ReasoningDefault: active.Model.ReasoningDefault,
 		}
 	} else {
 		// 没有显式默认时，取第一个可用模型，避免用户必须先设置默认才能用
@@ -118,16 +124,19 @@ func (c *AICatalog) snapshotForEntry(ctx context.Context, e model.CatalogEntry) 
 		return nil, ErrModelNotFound
 	}
 	return &CatalogSnapshot{
-		ProviderID:     p.ID,
-		ProviderName:   p.Name,
-		BaseURL:        p.BaseURL,
-		APIKeyCipher:   p.APIKeyCipher,
-		TimeoutSeconds: p.TimeoutSeconds,
-		ModelUUID:      e.ModelUUID,
-		ModelID:        e.ModelID,
-		Alias:          e.Alias,
-		DisplayName:    e.DisplayName,
-		ContextWindow:  e.ContextWindow,
+		ProviderID:       p.ID,
+		ProviderName:     p.Name,
+		BaseURL:          p.BaseURL,
+		APIKeyCipher:     p.APIKeyCipher,
+		TimeoutSeconds:   p.TimeoutSeconds,
+		ModelUUID:        e.ModelUUID,
+		ModelID:          e.ModelID,
+		Alias:            e.Alias,
+		DisplayName:      e.DisplayName,
+		ContextWindow:    e.ContextWindow,
+		ReasoningMode:    e.ReasoningMode,
+		ReasoningEfforts: e.ReasoningEfforts,
+		ReasoningDefault: e.ReasoningDefault,
 	}, nil
 }
 

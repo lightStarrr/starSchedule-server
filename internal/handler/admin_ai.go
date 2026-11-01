@@ -5,11 +5,13 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/starschedule/server/internal/aiproxy"
 	"github.com/starschedule/server/internal/crypto"
 	"github.com/starschedule/server/internal/dto"
 	"github.com/starschedule/server/internal/model"
@@ -38,17 +40,28 @@ func (d *Deps) providerJSON(p *model.Provider) gin.H {
 	}
 }
 
+// reasoningJSON 是给客户端看的思考能力描述。
+func reasoningJSON(mode string, efforts []string, def string) gin.H {
+	if efforts == nil {
+		efforts = []string{}
+	}
+	return gin.H{"mode": mode, "efforts": efforts, "default": def}
+}
+
 func modelJSON(m *model.ProviderModel) gin.H {
 	return gin.H{
-		"id":             m.ID.String(),
-		"provider_id":    m.ProviderID.String(),
-		"model_id":       m.ModelID,
-		"alias":          m.Alias,
-		"display_name":   m.DisplayName,
-		"context_window": m.ContextWindow,
-		"source":         m.Source,
-		"enabled":        m.Enabled,
-		"fetched_at":     m.FetchedAt.UTC(),
+		"id":                m.ID.String(),
+		"provider_id":       m.ProviderID.String(),
+		"model_id":          m.ModelID,
+		"alias":             m.Alias,
+		"display_name":      m.DisplayName,
+		"context_window":    m.ContextWindow,
+		"source":            m.Source,
+		"enabled":           m.Enabled,
+		"reasoning_mode":    m.ReasoningMode,
+		"reasoning_efforts": m.ReasoningEfforts,
+		"reasoning_default": m.ReasoningDefault,
+		"fetched_at":        m.FetchedAt.UTC(),
 	}
 }
 
@@ -84,6 +97,34 @@ func (d *Deps) ensureDefaultModel(ctx context.Context, m *model.ProviderModel) {
 	if err := d.Store.SetActive(ctx, m.ProviderID, m.ID); err == nil {
 		d.Catalog.Invalidate(ctx)
 	}
+}
+
+// AdminDetectReasoning POST /api/v1/admin/ai/models/:id/detect-reasoning
+func (d *Deps) AdminDetectReasoning(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		respond.InvalidArgument(c, "模型 ID 无效")
+		return
+	}
+	ctx := c.Request.Context()
+	m, err := d.Store.GetModel(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			respond.NotFound(c, "模型不存在")
+			return
+		}
+		respond.Internal(c, "查询模型失败")
+		return
+	}
+	mode, efforts := d.detectAndStore(ctx, m)
+	if mode == "unknown" {
+		respond.Error(c, http.StatusBadGateway, respond.CodeUpstreamError,
+			"无法判断该模型的思考能力，请检查供应商配置或稍后重试", nil)
+		return
+	}
+	d.Admin.Audit(ctx, adminFromAny(c), "ai.models.detect_reasoning", "model", m.ID.String(),
+		map[string]any{"mode": mode}, c.ClientIP())
+	c.JSON(http.StatusOK, gin.H{"reasoning_mode": mode, "reasoning_efforts": efforts})
 }
 
 // AdminListProviders GET /api/v1/admin/ai/providers
@@ -273,6 +314,61 @@ func (d *Deps) AdminListModels(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
+// detectReasoning 探测模型是否接受 reasoning_effort。
+// 200 视为支持；400 视为不支持；网络/超时等无法判断时返回 unknown，下次再试。
+func (d *Deps) detectReasoning(ctx context.Context, m *model.ProviderModel, baseURL, apiKey string) (string, []string) {
+	key := strings.ToLower(m.ModelID)
+	if strings.Contains(key, "reasoner") || strings.Contains(key, "thinking") || strings.HasPrefix(key, "qwq") {
+		// 这类模型固定带思考，没有强度参数
+		return "fixed", nil
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	resp, err := d.AI.OpenChat(probeCtx, baseURL, apiKey, aiproxy.BuildReasoningProbe(m.ModelID, "low"))
+	if err == nil {
+		_ = resp.Body.Close()
+		return "effort", aiproxy.ReasoningEfforts
+	}
+	var up *aiproxy.UpstreamError
+	if errors.As(err, &up) && up.StatusCode == http.StatusBadRequest {
+		return "none", nil
+	}
+	d.Logger.Warn("探测思考强度失败", "model", m.ModelID, "error", err)
+	return "unknown", nil
+}
+
+// detectAndStore 探测并写回模型，未探测出结果时保持原状。
+func (d *Deps) detectAndStore(ctx context.Context, m *model.ProviderModel) (string, []string) {
+	p, err := d.Store.GetProvider(ctx, m.ProviderID)
+	if err != nil {
+		return "unknown", nil
+	}
+	apiKey, err := d.Catalog.Cipher().Decrypt(p.APIKeyCipher)
+	if err != nil {
+		return "unknown", nil
+	}
+	mode, efforts := d.detectReasoning(ctx, m, p.BaseURL, apiKey)
+	if mode == "unknown" {
+		return mode, efforts
+	}
+	patch := postgres.ModelPatch{
+		ReasoningMode:    &mode,
+		ReasoningEfforts: &efforts,
+	}
+	// 支持设置档位但还没配默认值时，给一个稳妥的 medium
+	if mode == "effort" && m.ReasoningDefault == "" {
+		def := "medium"
+		patch.ReasoningDefault = &def
+	}
+	if _, err := d.Store.UpdateModel(ctx, m.ID, patch); err != nil {
+		d.Logger.Warn("写回思考强度能力失败", "model", m.ModelID, "error", err)
+		return "unknown", nil
+	}
+	d.Catalog.Invalidate(ctx)
+	return mode, efforts
+}
+
 // AdminSetDefaultModel PUT /api/v1/admin/ai/models/default
 // 把某个已启用的模型设为默认模型（客户端不传 model 时使用）。
 func (d *Deps) AdminSetDefaultModel(c *gin.Context) {
@@ -383,6 +479,16 @@ func (d *Deps) AdminSetModelAvailability(c *gin.Context) {
 	}
 	d.Catalog.Invalidate(ctx)
 
+	// 首次启用时自动探测该模型是否支持设置思考强度（每个模型只探一次）
+	if req.Enabled && target != uuid.Nil {
+		for _, r := range rows {
+			if r.ProviderID == target && r.ReasoningMode == "unknown" {
+				d.detectAndStore(ctx, &r)
+				break
+			}
+		}
+	}
+
 	providerID := ""
 	if target != uuid.Nil {
 		providerID = target.String()
@@ -425,6 +531,11 @@ func (d *Deps) AdminUpdateModel(c *gin.Context) {
 	}
 	var req dto.ModelPatchRequest
 	if !respond.BindJSON(c, &req) {
+		return
+	}
+	if req.ReasoningDefault != nil && *req.ReasoningDefault != "" &&
+		!aiproxy.IsValidReasoningEffort(*req.ReasoningDefault) {
+		respond.InvalidArgument(c, "思考强度只能是 minimal / low / medium / high")
 		return
 	}
 	// 同一个模型只允许一家供应商启用，直接 PATCH 打开会破坏这个约束

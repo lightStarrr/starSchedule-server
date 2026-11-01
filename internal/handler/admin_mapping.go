@@ -31,9 +31,10 @@ func postgresModelInput(req dto.ModelCreateRequest, providerID uuid.UUID, enable
 
 func postgresModelPatch(req dto.ModelPatchRequest) postgres.ModelPatch {
 	return postgres.ModelPatch{
-		Alias:         req.Alias,
-		DisplayName:   req.DisplayName,
-		ContextWindow: req.ContextWindow,
-		Enabled:       req.Enabled,
+		Alias:            req.Alias,
+		DisplayName:      req.DisplayName,
+		ContextWindow:    req.ContextWindow,
+		Enabled:          req.Enabled,
+		ReasoningDefault: req.ReasoningDefault,
 	}
 }

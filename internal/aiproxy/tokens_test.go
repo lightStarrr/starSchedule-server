@@ -35,14 +35,12 @@ func TestEstimateMessagesTokens(t *testing.T) {
 	}
 }
 
-func TestBuildUpstreamTruncatesMaxTokens(t *testing.T) {
-	mt := 99999
+func TestBuildUpstreamUsesServerMaxTokens(t *testing.T) {
 	req := ChatRequest{
-		Messages:  []Message{{Role: "user", Content: "hi"}},
-		MaxTokens: &mt,
-		Stop:      []string{"a", "b", "c", "d", "e"},
+		Messages: []Message{{Role: "user", Content: "hi"}},
+		Stop:     []string{"a", "b", "c", "d", "e"},
 	}
-	up := req.BuildUpstream("deepseek-chat", 4096, true)
+	up := req.BuildUpstream("deepseek-chat", 4096, true, "medium")
 	if up.MaxTokens != 4096 {
 		t.Fatalf("max_tokens 未被截断: %d", up.MaxTokens)
 	}
@@ -55,10 +53,9 @@ func TestBuildUpstreamTruncatesMaxTokens(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	mt := 0
-	bad := ChatRequest{Messages: []Message{{Role: "user", Content: "hi"}}, MaxTokens: &mt}
+	bad := ChatRequest{Messages: []Message{{Role: "user", Content: "   "}}}
 	if err := bad.Validate(4096, 1024); err == nil {
-		t.Fatal("max_tokens=0 应该校验失败")
+		t.Fatal("空消息内容应该校验失败")
 	}
 	ok := ChatRequest{Messages: []Message{{Role: "user", Content: "hi"}}}
 	if err := ok.Validate(4096, 1024); err != nil {

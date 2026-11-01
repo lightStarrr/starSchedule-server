@@ -13,14 +13,14 @@ type Message struct {
 }
 
 // ChatRequest 是客户端可见的请求体，只保留白名单字段。
+// 温度与 max_tokens 不再对外开放：输出上限由服务端配置决定。
 type ChatRequest struct {
-	Messages    []Message `json:"messages"`
-	Temperature *float64  `json:"temperature,omitempty"`
-	TopP        *float64  `json:"top_p,omitempty"`
-	MaxTokens   *int      `json:"max_tokens,omitempty"`
-	Stop        []string  `json:"stop,omitempty"`
-	Stream      bool      `json:"stream,omitempty"`
-	Model       string    `json:"model,omitempty"`
+	Messages        []Message `json:"messages"`
+	TopP            *float64  `json:"top_p,omitempty"`
+	Stop            []string  `json:"stop,omitempty"`
+	Stream          bool      `json:"stream,omitempty"`
+	Model           string    `json:"model,omitempty"`
+	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
 }
 
 type streamOptions struct {
@@ -29,14 +29,14 @@ type streamOptions struct {
 
 // upstreamRequest 是实际发给供应商的载荷，字段收敛，避免客户端越权。
 type upstreamRequest struct {
-	Model         string         `json:"model"`
-	Messages      []Message      `json:"messages"`
-	Temperature   *float64       `json:"temperature,omitempty"`
-	TopP          *float64       `json:"top_p,omitempty"`
-	MaxTokens     int            `json:"max_tokens"`
-	Stop          []string       `json:"stop,omitempty"`
-	Stream        bool           `json:"stream"`
-	StreamOptions *streamOptions `json:"stream_options,omitempty"`
+	Model           string         `json:"model"`
+	Messages        []Message      `json:"messages"`
+	TopP            *float64       `json:"top_p,omitempty"`
+	MaxTokens       int            `json:"max_tokens"`
+	Stop            []string       `json:"stop,omitempty"`
+	Stream          bool           `json:"stream"`
+	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
+	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
 }
 
 type Usage struct {
@@ -78,8 +78,8 @@ type streamChunk struct {
 	} `json:"usage"`
 }
 
-// DefaultTemperature 客户端不传时使用的温度，避免上游默认值各不相同。
-const DefaultTemperature = 0.7
+// ReasoningEfforts 是 OpenAI 兼容的思考强度档位。
+var ReasoningEfforts = []string{"minimal", "low", "medium", "high"}
 
 // ErrInputTooLarge 表示 messages 超过字节上限。
 // handler 用 errors.Is 判断并返回 413，避免靠文案相等来分支。
@@ -108,42 +108,38 @@ func (r *ChatRequest) Validate(maxOutput int, maxInputBytes int) error {
 	if total > maxInputBytes {
 		return ErrInputTooLarge
 	}
-	if r.Temperature != nil && (*r.Temperature < 0 || *r.Temperature > 2) {
-		return errors.New("temperature 必须在 0–2 之间")
-	}
 	if r.TopP != nil && (*r.TopP < 0 || *r.TopP > 1) {
 		return errors.New("top_p 必须在 0–1 之间")
 	}
 	if len(r.Stop) > 4 {
 		return errors.New("stop 最多 4 条")
 	}
-	if r.MaxTokens != nil && *r.MaxTokens < 1 {
-		return errors.New("max_tokens 必须大于 0")
+	if r.ReasoningEffort != "" && !IsValidReasoningEffort(r.ReasoningEffort) {
+		return errors.New("reasoning_effort 只能是 minimal / low / medium / high")
 	}
 	_ = maxOutput
 	return nil
 }
 
-// BuildUpstream 组装上游请求体，max_tokens 由服务端截断。
-func (r *ChatRequest) BuildUpstream(model string, maxOutput int, stream bool) upstreamRequest {
-	maxTokens := maxOutput
-	if r.MaxTokens != nil && *r.MaxTokens > 0 && *r.MaxTokens < maxOutput {
-		maxTokens = *r.MaxTokens
+// IsValidReasoningEffort 判断档位是否属于 OpenAI 兼容集合。
+func IsValidReasoningEffort(effort string) bool {
+	for _, v := range ReasoningEfforts {
+		if v == effort {
+			return true
+		}
 	}
-	// 客户端没传 temperature 时显式下发默认值：上游默认常是 1.0，行为不可预期
-	temperature := r.Temperature
-	if temperature == nil {
-		def := DefaultTemperature
-		temperature = &def
-	}
+	return false
+}
 
+// BuildUpstream 组装上游请求体，max_tokens 始终由服务端配置决定。
+func (r *ChatRequest) BuildUpstream(model string, maxOutput int, stream bool, effort string) upstreamRequest {
 	out := upstreamRequest{
-		Model:       model,
-		Messages:    r.Messages,
-		Temperature: temperature,
-		TopP:        r.TopP,
-		MaxTokens:   maxTokens,
-		Stream:      stream,
+		Model:           model,
+		Messages:        r.Messages,
+		TopP:            r.TopP,
+		MaxTokens:       maxOutput,
+		Stream:          stream,
+		ReasoningEffort: effort,
 	}
 	if len(r.Stop) > 0 {
 		out.Stop = r.Stop[:min(len(r.Stop), 4)]
@@ -152,6 +148,18 @@ func (r *ChatRequest) BuildUpstream(model string, maxOutput int, stream bool) up
 		out.StreamOptions = &streamOptions{IncludeUsage: true}
 	}
 	return out
+}
+
+// BuildReasoningProbe 构造一条最小请求，用于探测上游是否接受 reasoning_effort：
+// 200 说明接受，400 说明不支持，其余错误无法判断。
+func BuildReasoningProbe(model, effort string) upstreamRequest {
+	return upstreamRequest{
+		Model:           model,
+		Messages:        []Message{{Role: "user", Content: "ping"}},
+		MaxTokens:       16,
+		Stream:          false,
+		ReasoningEffort: effort,
+	}
 }
 
 // EstimateTokens 估算 token 数：CJK 按字符计，ASCII 按 4 字符 1 token，另加结构开销。

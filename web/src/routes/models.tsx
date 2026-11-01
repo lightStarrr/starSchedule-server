@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { z } from 'zod'
 import { toast } from 'sonner'
 import { Link } from 'react-router'
-import { CpuIcon, MoreHorizontalIcon, PlusIcon, StarIcon, Trash2Icon } from 'lucide-react'
+import { CpuIcon, MoreHorizontalIcon, PlusIcon, SparklesIcon, StarIcon, Trash2Icon } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,7 +38,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
@@ -163,6 +168,38 @@ export function ModelsPage() {
       api('/admin/ai/models/default', { method: 'PUT', body: { model_id: modelId } }),
     onSuccess: () => {
       toast.success('已设为默认模型')
+      invalidate()
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+
+  const detectReasoning = useMutation({
+    mutationFn: (modelId: string) =>
+      api<{ reasoning_mode: string; reasoning_efforts: string[] | null }>(
+        `/admin/ai/models/${modelId}/detect-reasoning`,
+        { method: 'POST' },
+      ),
+    onSuccess: (result) => {
+      const label =
+        result.reasoning_mode === 'effort'
+          ? '可设置思考强度'
+          : result.reasoning_mode === 'fixed'
+            ? '固定带思考'
+            : '不支持思考强度'
+      toast.success(`检测完成：${label}`)
+      invalidate()
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+
+  const setReasoningDefault = useMutation({
+    mutationFn: (vars: { modelId: string; effort: string }) =>
+      api(`/admin/ai/models/${vars.modelId}`, {
+        method: 'PATCH',
+        body: { reasoning_default: vars.effort },
+      }),
+    onSuccess: () => {
+      toast.success('默认思考强度已更新')
       invalidate()
     },
     onError: (error) => toast.error(errorMessage(error)),
@@ -379,6 +416,17 @@ export function ModelsPage() {
                           {group.rows.length > 1 ? (
                             <Badge variant="outline">{group.rows.length} 家提供</Badge>
                           ) : null}
+                          {group.active.reasoning_mode === 'effort' ? (
+                            <Badge variant="outline">
+                              思考 {group.active.reasoning_default || '可设置'}
+                            </Badge>
+                          ) : group.active.reasoning_mode === 'fixed' ? (
+                            <Badge variant="outline">固定思考</Badge>
+                          ) : group.active.reasoning_mode === 'unknown' ? (
+                            <Badge variant="outline" className="text-muted-foreground">
+                              未检测思考
+                            </Badge>
+                          ) : null}
                         </span>
                       </div>
                     </TableCell>
@@ -457,6 +505,38 @@ export function ModelsPage() {
                             <StarIcon />
                             {group.active.id === defaultModelId ? '已是默认模型' : '设为默认'}
                           </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={detectReasoning.isPending}
+                            onClick={() => detectReasoning.mutate(group.active.id)}
+                          >
+                            <SparklesIcon />
+                            检测思考能力
+                          </DropdownMenuItem>
+                          {group.active.reasoning_mode === 'effort' ? (
+                            <DropdownMenuSub>
+                              <DropdownMenuSubTrigger>默认思考强度</DropdownMenuSubTrigger>
+                              <DropdownMenuSubContent>
+                                <DropdownMenuRadioGroup
+                                  value={group.active.reasoning_default}
+                                  onValueChange={(value) =>
+                                    setReasoningDefault.mutate({
+                                      modelId: group.active.id,
+                                      effort: value,
+                                    })
+                                  }
+                                >
+                                  <DropdownMenuRadioItem value="">不指定</DropdownMenuRadioItem>
+                                  {(group.active.reasoning_efforts ?? ['minimal', 'low', 'medium', 'high']).map(
+                                    (item) => (
+                                      <DropdownMenuRadioItem key={item} value={item}>
+                                        {item}
+                                      </DropdownMenuRadioItem>
+                                    ),
+                                  )}
+                                </DropdownMenuRadioGroup>
+                              </DropdownMenuSubContent>
+                            </DropdownMenuSub>
+                          ) : null}
                           <DropdownMenuSeparator />
                           <DropdownMenuItem variant="destructive" onClick={() => setPendingDelete(group)}>
                             <Trash2Icon />

@@ -150,7 +150,8 @@
       "provider_name": "deepseek",
       "context_window": 65536,
       "supports_stream": true,
-      "is_default": true
+      "is_default": true,
+      "reasoning": { "mode": "effort", "efforts": ["minimal", "low", "medium", "high"], "default": "medium" }
     },
     {
       "alias": "deepseek-reasoner",
@@ -158,7 +159,8 @@
       "provider_name": "deepseek",
       "context_window": 65536,
       "supports_stream": true,
-      "is_default": false
+      "is_default": false,
+      "reasoning": { "mode": "fixed", "efforts": [], "default": "" }
     }
   ],
   "default": "deepseek-chat",
@@ -171,13 +173,14 @@
 - `is_default` 标记默认模型，客户端不传 `model` 时使用它。
 - **`default` 可能是空串**（后台默认模型在两次查询之间被关闭）：此时 `is_default` 全为 `false`，客户端应兜底取 `items[0]`。
 - 没有可用模型时 `503 AI_NOT_CONFIGURED`（客户端隐藏 AI 入口）。
+- `reasoning.mode`：`effort` 可设置强度、`fixed` 固定带思考（不能传）、`none` 不支持、`unknown` 尚未检测；`reasoning.default` 是客户端不传时服务端实际使用的档位。
 - 缓存：响应带 `ETag` 与 `Cache-Control: private, max-age=60`；带 `If-None-Match` 命中时返回 `304`，此时**没有 body**，但 `X-Server-Time` 头仍是最新的。
 
 ## 7. GET /ai/config
 
 ```json
 {
-  "model": { "alias": "deepseek-chat", "display_name": "DeepSeek Chat", "context_window": 65536, "supports_stream": true },
+  "model": { "alias": "deepseek-chat", "display_name": "DeepSeek Chat", "context_window": 65536, "supports_stream": true, "reasoning": { "mode": "effort", "efforts": ["minimal", "low", "medium", "high"], "default": "medium" } },
   "limits": {
     "rpm": 20,
     "inflight": 2,
@@ -207,10 +210,7 @@
     { "role": "system", "content": "你是星课表助手" },
     { "role": "user", "content": "帮我把周三的课挪到周五" }
   ],
-  "temperature": 0.7,
-  "top_p": 0.9,
-  "max_tokens": 1024,
-  "stop": ["\n\n"],
+  "reasoning_effort": "medium",
   "stream": true
 }
 ```
@@ -218,12 +218,13 @@
 | 字段 | 类型 | 必需 | 约束 |
 | --- | --- | --- | --- |
 | `messages` | array | 是 | 1–100 条；`role ∈ {system,user,assistant}`；整段 ≤131072 字节，超出返回 `413 PAYLOAD_TOO_LARGE` |
-| `temperature` | float | 否 | 0–2；不传时服务端**显式下发 0.7**，不依赖上游默认值 |
 | `top_p` | float | 否 | 0–1 |
-| `max_tokens` | int | 否 | 超出服务端上限会被截断 |
 | `stop` | string[] | 否 | ≤4 条 |
+| `reasoning_effort` | string | 否 | `minimal` / `low` / `medium` / `high`；不传则用该模型配置的默认档位。模型不支持时返回 `400 INVALID_ARGUMENT` |
 | `stream` | bool | 否 | 默认 `false` |
 | `model` | string | 否 | 取 `/ai/models` 里的 `alias`；省略则用默认模型。不存在或未启用返回 `400 MODEL_NOT_AVAILABLE` |
+
+温度与 `max_tokens` 不再对外开放：输出上限由服务端 `max_output_tokens` 统一控制。
 
 **非流式** `200 application/json`：
 

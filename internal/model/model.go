@@ -78,16 +78,19 @@ type Provider struct {
 }
 
 type ProviderModel struct {
-	ID            uuid.UUID
-	ProviderID    uuid.UUID
-	ModelID       string
-	Alias         string
-	DisplayName   string
-	ContextWindow int
-	Source        string
-	Enabled       bool
-	FetchedAt     time.Time
-	CreatedAt     time.Time
+	ID               uuid.UUID
+	ProviderID       uuid.UUID
+	ModelID          string
+	Alias            string
+	DisplayName      string
+	ContextWindow    int
+	Source           string
+	Enabled          bool
+	ReasoningMode    string
+	ReasoningEfforts []string
+	ReasoningDefault string
+	FetchedAt        time.Time
+	CreatedAt        time.Time
 }
 
 // ActiveAIConfig 是当前生效的供应商 + 模型组合。
@@ -98,16 +101,19 @@ type ActiveAIConfig struct {
 
 // CatalogEntry 是「可调用模型」的扁平视图，供后台选择器使用。
 type CatalogEntry struct {
-	ProviderID    uuid.UUID `json:"provider_id"`
-	ProviderName  string    `json:"provider_name"`
-	ModelUUID     uuid.UUID `json:"id"`
-	ModelID       string    `json:"model_id"`
-	Alias         string    `json:"alias"`
-	DisplayName   string    `json:"display_name"`
-	ContextWindow int       `json:"context_window"`
-	Enabled       bool      `json:"enabled"`
-	Source        string    `json:"source"`
-	FetchedAt     time.Time `json:"fetched_at"`
+	ProviderID       uuid.UUID `json:"provider_id"`
+	ProviderName     string    `json:"provider_name"`
+	ModelUUID        uuid.UUID `json:"id"`
+	ModelID          string    `json:"model_id"`
+	Alias            string    `json:"alias"`
+	DisplayName      string    `json:"display_name"`
+	ContextWindow    int       `json:"context_window"`
+	Enabled          bool      `json:"enabled"`
+	Source           string    `json:"source"`
+	ReasoningMode    string    `json:"reasoning_mode"`
+	ReasoningEfforts []string  `json:"reasoning_efforts"`
+	ReasoningDefault string    `json:"reasoning_default"`
+	FetchedAt        time.Time `json:"fetched_at"`
 }
 
 type UsageRow struct {

@@ -13,7 +13,6 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
-import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Select,
@@ -59,6 +58,9 @@ export function PlaygroundPage() {
   }, [catalog.data, items, modelKey])
 
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const selected = items.find((item) => item.alias === modelKey)
+  // 后端未返回思考能力时按「未检测」处理，避免误显示为不支持
+  const reasoningMode = selected?.reasoning_mode ?? 'unknown'
   const [input, setInput] = useState('')
   const [draft, setDraft] = useState('')
   const [streaming, setStreaming] = useState(false)
@@ -66,8 +68,8 @@ export function PlaygroundPage() {
   const [usage, setUsage] = useState<Usage | null>(null)
   const [firstTokenMs, setFirstTokenMs] = useState<number | null>(null)
   const [elapsedMs, setElapsedMs] = useState<number | null>(null)
-  const [temperature, setTemperature] = useState(0.7)
-  const [maxTokens, setMaxTokens] = useState(1024)
+  // 空串表示不指定，交给模型默认档位
+  const [effort, setEffort] = useState('')
 
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
@@ -99,7 +101,7 @@ export function PlaygroundPage() {
 
     try {
       await streamPlayground(
-        { messages: nextMessages, temperature, max_tokens: maxTokens, model: modelKey },
+        { messages: nextMessages, model: modelKey, reasoning_effort: effort || undefined },
         {
           onDelta: (delta) => {
             text += delta
@@ -315,27 +317,41 @@ export function PlaygroundPage() {
                 </Field>
 
                 <Field>
-                  <FieldLabel htmlFor="temperature">temperature</FieldLabel>
-                  <Input
-                    id="temperature"
-                    type="number"
-                    min={0}
-                    max={2}
-                    step={0.1}
-                    value={temperature}
-                    onChange={(event) => setTemperature(Number(event.target.value))}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="max-tokens">max_tokens</FieldLabel>
-                  <Input
-                    id="max-tokens"
-                    type="number"
-                    min={1}
-                    value={maxTokens}
-                    onChange={(event) => setMaxTokens(Number(event.target.value))}
-                  />
-                  <FieldDescription>服务端仍会按后台上限截断。</FieldDescription>
+                  <FieldLabel>思考强度</FieldLabel>
+                  {reasoningMode === 'effort' ? (
+                    <Select
+                      value={effort || '__default__'}
+                      onValueChange={(value) => setEffort(value === '__default__' ? '' : (value ?? ''))}
+                      items={[
+                        { value: '__default__', label: `默认（${selected?.reasoning_default || '不指定'}）` },
+                        ...(selected?.reasoning_efforts ?? []).map((item) => ({ value: item, label: item })),
+                      ]}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="__default__">
+                            默认（{selected?.reasoning_default || '不指定'}）
+                          </SelectItem>
+                          {(selected?.reasoning_efforts ?? []).map((item) => (
+                            <SelectItem key={item} value={item}>
+                              {item}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <FieldDescription>
+                      {reasoningMode === 'fixed'
+                        ? '该模型固定带思考，无法调整强度。'
+                        : reasoningMode === 'unknown'
+                          ? '尚未检测该模型的思考能力，可在模型页点「检测」。'
+                          : '该模型不支持设置思考强度。'}
+                    </FieldDescription>
+                  )}
                 </Field>
               </FieldGroup>
             </CardContent>

@@ -51,6 +51,7 @@ func (d *Deps) AIModels(c *gin.Context) {
 			"context_window":  e.ContextWindow,
 			"supports_stream": true,
 			"is_default":      e.Alias == current,
+			"reasoning":       reasoningJSON(e.ReasoningMode, e.ReasoningEfforts, e.ReasoningDefault),
 		})
 	}
 	// ETag 只覆盖「内容」部分（不含 server_time），命中时返回 304，
@@ -115,6 +116,7 @@ func (d *Deps) AIConfig(c *gin.Context) {
 			"display_name":    snap.DisplayName,
 			"context_window":  snap.ContextWindow,
 			"supports_stream": true,
+			"reasoning":       reasoningJSON(snap.ReasoningMode, snap.ReasoningEfforts, snap.ReasoningDefault),
 		},
 		"limits": gin.H{
 			"rpm":               settings.RPMPerDevice,
@@ -282,8 +284,26 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 
 	promptEstimate := aiproxy.EstimateMessagesTokens(req.Messages)
 	maxOutput := settings.MaxOutputTokens
-	if req.MaxTokens != nil && *req.MaxTokens > 0 && *req.MaxTokens < maxOutput {
-		maxOutput = *req.MaxTokens
+
+	// 思考强度：只有探测为 effort 的模型才接受，其余明确拒绝而不是静默忽略
+	reasoningEffort := ""
+	switch snap.ReasoningMode {
+	case "effort":
+		// 客户端没传就用模型配置的默认档位
+		reasoningEffort = req.ReasoningEffort
+		if reasoningEffort == "" {
+			reasoningEffort = snap.ReasoningDefault
+		}
+	case "fixed":
+		if req.ReasoningEffort != "" {
+			respond.InvalidArgument(c, "该模型固定带思考，无法设置思考强度")
+			return
+		}
+	default:
+		if req.ReasoningEffort != "" {
+			respond.InvalidArgument(c, "该模型不支持设置思考强度")
+			return
+		}
 	}
 
 	var quotaKey string
@@ -350,7 +370,7 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 
 	started := time.Now()
 	resp, err := d.AI.OpenChat(ctx, snap.BaseURL, apiKey,
-		req.BuildUpstream(snap.ModelID, settings.MaxOutputTokens, req.Stream))
+		req.BuildUpstream(snap.ModelID, maxOutput, req.Stream, reasoningEffort))
 	if err != nil {
 		d.writeRequestLog(c, caller, snap, reqLogOptions{
 			Stream:     req.Stream,

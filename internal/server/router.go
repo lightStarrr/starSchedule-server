@@ -106,6 +106,7 @@ func NewRouter(d *handler.Deps, cfg *config.Config) *gin.Engine {
 	authed.GET("/ai/catalog", d.AdminCatalog)
 	authed.POST("/ai/models", d.AdminCreateModel)
 	authed.PATCH("/ai/models/:id", d.AdminUpdateModel)
+	authed.POST("/ai/models/:id/detect-reasoning", d.AdminDetectReasoning)
 	authed.PUT("/ai/models/default", d.AdminSetDefaultModel)
 	authed.PUT("/ai/models/availability", d.AdminSetModelAvailability)
 	authed.POST("/ai/models/bulk-delete", d.AdminBulkDeleteModels)

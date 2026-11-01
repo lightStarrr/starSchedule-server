@@ -78,10 +78,11 @@ type BulkDeleteModelsRequest struct {
 }
 
 type ModelPatchRequest struct {
-	Alias         *string `json:"alias" binding:"omitempty,max=128"`
-	DisplayName   *string `json:"display_name" binding:"omitempty,max=128"`
-	ContextWindow *int    `json:"context_window" binding:"omitempty,min=0,max=10000000"`
-	Enabled       *bool   `json:"enabled"`
+	Alias            *string `json:"alias" binding:"omitempty,max=128"`
+	DisplayName      *string `json:"display_name" binding:"omitempty,max=128"`
+	ContextWindow    *int    `json:"context_window" binding:"omitempty,min=0,max=10000000"`
+	Enabled          *bool   `json:"enabled"`
+	ReasoningDefault *string `json:"reasoning_default"`
 }
 
 type BanRequest struct {

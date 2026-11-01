@@ -118,12 +118,12 @@ func (s *Store) SetProviderCheck(ctx context.Context, id uuid.UUID, ok bool, err
 }
 
 const modelColumns = `id, provider_id, model_id, alias, display_name, context_window, source,
-	enabled, fetched_at, created_at`
+	enabled, reasoning_mode, reasoning_efforts, reasoning_default, fetched_at, created_at`
 
 func scanModel(row pgx.Row) (*model.ProviderModel, error) {
 	var m model.ProviderModel
 	err := row.Scan(&m.ID, &m.ProviderID, &m.ModelID, &m.Alias, &m.DisplayName, &m.ContextWindow,
-		&m.Source, &m.Enabled, &m.FetchedAt, &m.CreatedAt)
+		&m.Source, &m.Enabled, &m.ReasoningMode, &m.ReasoningEfforts, &m.ReasoningDefault, &m.FetchedAt, &m.CreatedAt)
 	if err != nil {
 		return nil, mapNoRows(err)
 	}
@@ -181,7 +181,7 @@ func (s *Store) ListModels(ctx context.Context, providerID uuid.UUID) ([]model.P
 	for rows.Next() {
 		var m model.ProviderModel
 		if err := rows.Scan(&m.ID, &m.ProviderID, &m.ModelID, &m.Alias, &m.DisplayName, &m.ContextWindow,
-			&m.Source, &m.Enabled, &m.FetchedAt, &m.CreatedAt); err != nil {
+			&m.Source, &m.Enabled, &m.ReasoningMode, &m.ReasoningEfforts, &m.ReasoningDefault, &m.FetchedAt, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -224,10 +224,13 @@ func (s *Store) CreateModel(ctx context.Context, in ModelInput) (*model.Provider
 }
 
 type ModelPatch struct {
-	Alias         *string
-	DisplayName   *string
-	ContextWindow *int
-	Enabled       *bool
+	Alias            *string
+	DisplayName      *string
+	ContextWindow    *int
+	Enabled          *bool
+	ReasoningMode    *string
+	ReasoningEfforts *[]string
+	ReasoningDefault *string
 }
 
 func (s *Store) UpdateModel(ctx context.Context, id uuid.UUID, p ModelPatch) (*model.ProviderModel, error) {
@@ -247,10 +250,21 @@ func (s *Store) UpdateModel(ctx context.Context, id uuid.UUID, p ModelPatch) (*m
 	if p.Enabled != nil {
 		cur.Enabled = *p.Enabled
 	}
+	if p.ReasoningMode != nil {
+		cur.ReasoningMode = *p.ReasoningMode
+	}
+	if p.ReasoningEfforts != nil {
+		cur.ReasoningEfforts = *p.ReasoningEfforts
+	}
+	if p.ReasoningDefault != nil {
+		cur.ReasoningDefault = *p.ReasoningDefault
+	}
 	m, err := scanModel(s.pool.QueryRow(ctx, `
-		UPDATE ai_provider_models SET alias = $2, display_name = $3, context_window = $4, enabled = $5
+		UPDATE ai_provider_models SET alias = $2, display_name = $3, context_window = $4, enabled = $5,
+			reasoning_mode = $6, reasoning_efforts = $7, reasoning_default = $8
 		WHERE id = $1 RETURNING `+modelColumns,
-		id, cur.Alias, cur.DisplayName, cur.ContextWindow, cur.Enabled))
+		id, cur.Alias, cur.DisplayName, cur.ContextWindow, cur.Enabled,
+		cur.ReasoningMode, cur.ReasoningEfforts, cur.ReasoningDefault))
 	if err != nil && isUniqueViolation(err) {
 		return nil, store.ErrConflict
 	}
@@ -271,7 +285,7 @@ const (
 func (s *Store) ListEnabledCatalog(ctx context.Context) ([]model.CatalogEntry, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT p.id, p.name, m.id, m.model_id, m.alias, m.display_name, m.context_window,
-		       m.source, m.fetched_at
+		       m.source, m.reasoning_mode, m.reasoning_efforts, m.reasoning_default, m.fetched_at
 		FROM ai_provider_models m
 		JOIN ai_providers p ON p.id = m.provider_id
 		WHERE m.enabled AND p.enabled
@@ -284,7 +298,8 @@ func (s *Store) ListEnabledCatalog(ctx context.Context) ([]model.CatalogEntry, e
 	for rows.Next() {
 		var e model.CatalogEntry
 		if err := rows.Scan(&e.ProviderID, &e.ProviderName, &e.ModelUUID, &e.ModelID,
-			&e.Alias, &e.DisplayName, &e.ContextWindow, &e.Source, &e.FetchedAt); err != nil {
+			&e.Alias, &e.DisplayName, &e.ContextWindow, &e.Source,
+			&e.ReasoningMode, &e.ReasoningEfforts, &e.ReasoningDefault, &e.FetchedAt); err != nil {
 			return nil, err
 		}
 		e.Enabled = true
@@ -316,7 +331,7 @@ func (s *Store) ListModelsByModelID(ctx context.Context, modelID string) ([]mode
 func (s *Store) ListAllModels(ctx context.Context) ([]model.CatalogEntry, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT p.id, p.name, m.id, m.model_id, m.alias, m.display_name, m.context_window,
-		       m.enabled, m.source, m.fetched_at
+		       m.enabled, m.source, m.reasoning_mode, m.reasoning_efforts, m.reasoning_default, m.fetched_at
 		FROM ai_provider_models m
 		JOIN ai_providers p ON p.id = m.provider_id
 		WHERE p.enabled
@@ -329,7 +344,8 @@ func (s *Store) ListAllModels(ctx context.Context) ([]model.CatalogEntry, error)
 	for rows.Next() {
 		var e model.CatalogEntry
 		if err := rows.Scan(&e.ProviderID, &e.ProviderName, &e.ModelUUID, &e.ModelID,
-			&e.Alias, &e.DisplayName, &e.ContextWindow, &e.Enabled, &e.Source, &e.FetchedAt); err != nil {
+			&e.Alias, &e.DisplayName, &e.ContextWindow, &e.Enabled, &e.Source,
+			&e.ReasoningMode, &e.ReasoningEfforts, &e.ReasoningDefault, &e.FetchedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

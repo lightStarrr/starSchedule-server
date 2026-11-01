@@ -177,25 +177,8 @@ func (c *AICatalog) SnapshotByKey(ctx context.Context, key string) (*CatalogSnap
 		if e.Alias != key && e.ModelID != key {
 			continue
 		}
-		p, err := c.store.GetProvider(ctx, e.ProviderID)
-		if err != nil {
-			return nil, err
-		}
-		if !p.Enabled {
-			break
-		}
-		return &CatalogSnapshot{
-			ProviderID:     p.ID,
-			ProviderName:   p.Name,
-			BaseURL:        p.BaseURL,
-			APIKeyCipher:   p.APIKeyCipher,
-			TimeoutSeconds: p.TimeoutSeconds,
-			ModelUUID:      e.ModelUUID,
-			ModelID:        e.ModelID,
-			Alias:          e.Alias,
-			DisplayName:    e.DisplayName,
-			ContextWindow:  e.ContextWindow,
-		}, nil
+		// 统一走 snapshotForEntry，避免新增字段时漏填（之前思考能力就漏在这里）
+		return c.snapshotForEntry(ctx, e)
 	}
 	return nil, ErrModelNotFound
 }

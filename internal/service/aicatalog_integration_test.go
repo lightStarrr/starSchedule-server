@@ -151,13 +151,29 @@ func TestAICatalogIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("按别名解析", func(t *testing.T) {
+	t.Run("按别名解析并带出思考能力", func(t *testing.T) {
+		mode := "effort"
+		efforts := []string{"low", "medium", "high"}
+		def := "medium"
+		if _, err := st.UpdateModel(ctx, first.ID, postgres.ModelPatch{
+			ReasoningMode:    &mode,
+			ReasoningEfforts: &efforts,
+			ReasoningDefault: &def,
+		}); err != nil {
+			t.Fatalf("写入思考能力失败: %v", err)
+		}
+		cat.Invalidate(ctx)
+
 		snap, err := cat.SnapshotByKey(ctx, first.Alias)
 		if err != nil {
 			t.Fatalf("SnapshotByKey 失败: %v", err)
 		}
 		if snap.ModelUUID != first.ID {
 			t.Fatalf("别名解析到了错误的模型: %s", snap.ModelID)
+		}
+		if snap.ReasoningMode != "effort" || snap.ReasoningDefault != "medium" || len(snap.ReasoningEfforts) != 3 {
+			t.Fatalf("思考能力没有带出来: mode=%q default=%q efforts=%v",
+				snap.ReasoningMode, snap.ReasoningDefault, snap.ReasoningEfforts)
 		}
 	})
 

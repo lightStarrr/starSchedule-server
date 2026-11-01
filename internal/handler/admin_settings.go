@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/starschedule/server/internal/aiproxy"
 	"github.com/starschedule/server/internal/dto"
 	"github.com/starschedule/server/internal/respond"
 )
@@ -19,6 +20,7 @@ var settingKeys = map[string]string{
 	"device.register_per_ip_hour": "int",
 	"retention.launch_event_days": "int",
 	"retention.ai_log_days":       "int",
+	"ai.reasoning_effort":         "string",
 }
 
 // AdminGetSettings GET /api/v1/admin/settings
@@ -50,6 +52,7 @@ func (d *Deps) AdminGetSettings(c *gin.Context) {
 			"device.register_per_ip_hour": effective.RegisterPerIPHour,
 			"retention.launch_event_days": effective.LaunchRetentionDays,
 			"retention.ai_log_days":       effective.AILogRetentionDays,
+			"ai.reasoning_effort":         effective.ReasoningEffort,
 		},
 		"defaults": gin.H{
 			"ai.daily_token_quota":        def.DailyTokenQuota,
@@ -60,6 +63,7 @@ func (d *Deps) AdminGetSettings(c *gin.Context) {
 			"device.register_per_ip_hour": def.RegisterPerIPHour,
 			"retention.launch_event_days": def.LaunchRetentionDays,
 			"retention.ai_log_days":       def.AILogRetentionDays,
+			"ai.reasoning_effort":         def.ReasoningEffort,
 		},
 	})
 }
@@ -88,6 +92,19 @@ func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 				respond.Internal(c, "恢复默认值失败")
 				return
 			}
+			continue
+		}
+		if settingKeys[k] == "string" {
+			str, ok := v.(string)
+			if !ok {
+				respond.InvalidArgument(c, "配置项 "+k+" 必须是字符串")
+				return
+			}
+			if k == "ai.reasoning_effort" && str != "" && !aiproxy.IsValidReasoningEffort(str) {
+				respond.InvalidArgument(c, "思考强度只能是 minimal / low / medium / high，或留空表示不指定")
+				return
+			}
+			updates[k] = str
 			continue
 		}
 		num, ok := toPositiveInt(v)

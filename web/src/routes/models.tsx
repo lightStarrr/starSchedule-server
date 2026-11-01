@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { z } from 'zod'
 import { toast } from 'sonner'
 import { Link } from 'react-router'
-import { CpuIcon, MoreHorizontalIcon, PlusIcon, SparklesIcon, StarIcon, Trash2Icon } from 'lucide-react'
+import { CpuIcon, MoreHorizontalIcon, PlusIcon, SparklesIcon, Trash2Icon } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,12 +38,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
@@ -120,6 +115,12 @@ export function ModelsPage() {
     queryFn: () => api<{ active: ActiveAI | null }>('/admin/ai/active'),
   })
 
+  const settings = useQuery({
+    queryKey: ['settings'],
+    queryFn: () =>
+      api<{ effective: Record<string, number | string> }>('/admin/settings'),
+  })
+
   const form = useForm<ModelForm>({
     resolver: zodResolver(modelSchema),
     defaultValues: defaults,
@@ -192,15 +193,17 @@ export function ModelsPage() {
     onError: (error) => toast.error(errorMessage(error)),
   })
 
-  const setReasoningDefault = useMutation({
-    mutationFn: (vars: { modelId: string; effort: string }) =>
-      api(`/admin/ai/models/${vars.modelId}`, {
-        method: 'PATCH',
-        body: { reasoning_default: vars.effort },
+  // 默认思考强度是全局设置，所有支持档位的模型共用
+  const setGlobalEffort = useMutation({
+    mutationFn: (effort: string) =>
+      api('/admin/settings', {
+        method: 'PUT',
+        body: { values: { 'ai.reasoning_effort': effort } },
       }),
     onSuccess: () => {
       toast.success('默认思考强度已更新')
-      invalidate()
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+      void queryClient.invalidateQueries({ queryKey: ['ai'] })
     },
     onError: (error) => toast.error(errorMessage(error)),
   })
@@ -232,6 +235,9 @@ export function ModelsPage() {
   }, [models.data])
 
   const defaultModelId = active.data?.active?.model_id ?? ''
+  const globalEffort = String(settings.data?.effective?.['ai.reasoning_effort'] ?? '')
+  const enabledGroups = groups.filter((group) => group.enabled)
+  const defaultGroup = groups.find((group) => group.active.id === defaultModelId)
   const enabledCount = groups.filter((group) => group.enabled).length
   const providerItems = (providers.data?.items ?? []).filter((provider) => provider.enabled)
 
@@ -245,7 +251,67 @@ export function ModelsPage() {
             : '先在「供应商」里同步模型，或在这里手动添加。'
         }
         actions={
-          <Dialog open={open} onOpenChange={setOpen}>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">默认模型</span>
+              <Select
+                value={defaultModelId}
+                onValueChange={(value) => value && setDefault.mutate(value)}
+                disabled={enabledGroups.length === 0 || setDefault.isPending}
+                items={enabledGroups.map((group) => ({
+                  value: group.active.id,
+                  label: group.active.display_name || group.modelId,
+                }))}
+              >
+                <SelectTrigger size="sm" className="w-40">
+                  <SelectValue placeholder="未设置" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {enabledGroups.map((group) => (
+                      <SelectItem key={group.active.id} value={group.active.id}>
+                        {group.active.display_name || group.modelId}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">默认强度</span>
+              <Select
+                value={globalEffort || '__none__'}
+                onValueChange={(value) =>
+                  setGlobalEffort.mutate(value === '__none__' ? '' : (value ?? ''))
+                }
+                disabled={defaultGroup?.active.reasoning_mode !== 'effort' || setGlobalEffort.isPending}
+                items={[
+                  { value: '__none__', label: '不指定' },
+                  ...(defaultGroup?.active.reasoning_efforts ?? ['minimal', 'low', 'medium', 'high']).map(
+                    (item) => ({ value: item, label: item }),
+                  ),
+                ]}
+              >
+                <SelectTrigger size="sm" className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="__none__">不指定</SelectItem>
+                    {(defaultGroup?.active.reasoning_efforts ?? ['minimal', 'low', 'medium', 'high']).map(
+                      (item) => (
+                        <SelectItem key={item} value={item}>
+                          {item}
+                        </SelectItem>
+                      ),
+                    )}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger
               render={
                 <Button
@@ -350,8 +416,9 @@ export function ModelsPage() {
                   </Button>
                 </DialogFooter>
               </form>
-            </DialogContent>
-          </Dialog>
+              </DialogContent>
+            </Dialog>
+          </div>
         }
       />
 
@@ -390,6 +457,7 @@ export function ModelsPage() {
                 <TableRow>
                   <TableHead>模型</TableHead>
                   <TableHead>供应商</TableHead>
+                  <TableHead className="hidden md:table-cell">思考</TableHead>
                   <TableHead className="hidden lg:table-cell text-right">上下文</TableHead>
                   <TableHead className="hidden sm:table-cell">来源</TableHead>
                   <TableHead className="text-center">可用</TableHead>
@@ -415,17 +483,6 @@ export function ModelsPage() {
                           </span>
                           {group.rows.length > 1 ? (
                             <Badge variant="outline">{group.rows.length} 家提供</Badge>
-                          ) : null}
-                          {group.active.reasoning_mode === 'effort' ? (
-                            <Badge variant="outline">
-                              思考 {group.active.reasoning_default || '可设置'}
-                            </Badge>
-                          ) : group.active.reasoning_mode === 'fixed' ? (
-                            <Badge variant="outline">固定思考</Badge>
-                          ) : group.active.reasoning_mode === 'unknown' ? (
-                            <Badge variant="outline" className="text-muted-foreground">
-                              未检测思考
-                            </Badge>
                           ) : null}
                         </span>
                       </div>
@@ -465,6 +522,23 @@ export function ModelsPage() {
                         </span>
                       )}
                     </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      <div className="flex flex-col gap-0.5">
+                        {group.active.reasoning_mode === 'effort' ? (
+                          <Badge variant="secondary">可设置</Badge>
+                        ) : group.active.reasoning_mode === 'fixed' ? (
+                          <Badge variant="secondary">固定开启</Badge>
+                        ) : group.active.reasoning_mode === 'unknown' ? (
+                          <Badge variant="outline" className="text-muted-foreground">
+                            未检测
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-muted-foreground">
+                            不支持
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="hidden lg:table-cell text-right tabular-nums">
                       {group.active.context_window ? formatNumber(group.active.context_window) : '—'}
                     </TableCell>
@@ -499,44 +573,12 @@ export function ModelsPage() {
                         />
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
-                            disabled={!group.enabled || group.active.id === defaultModelId}
-                            onClick={() => setDefault.mutate(group.active.id)}
-                          >
-                            <StarIcon />
-                            {group.active.id === defaultModelId ? '已是默认模型' : '设为默认'}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
                             disabled={detectReasoning.isPending}
                             onClick={() => detectReasoning.mutate(group.active.id)}
                           >
                             <SparklesIcon />
                             检测思考能力
                           </DropdownMenuItem>
-                          {group.active.reasoning_mode === 'effort' ? (
-                            <DropdownMenuSub>
-                              <DropdownMenuSubTrigger>默认思考强度</DropdownMenuSubTrigger>
-                              <DropdownMenuSubContent>
-                                <DropdownMenuRadioGroup
-                                  value={group.active.reasoning_default}
-                                  onValueChange={(value) =>
-                                    setReasoningDefault.mutate({
-                                      modelId: group.active.id,
-                                      effort: value,
-                                    })
-                                  }
-                                >
-                                  <DropdownMenuRadioItem value="">不指定</DropdownMenuRadioItem>
-                                  {(group.active.reasoning_efforts ?? ['minimal', 'low', 'medium', 'high']).map(
-                                    (item) => (
-                                      <DropdownMenuRadioItem key={item} value={item}>
-                                        {item}
-                                      </DropdownMenuRadioItem>
-                                    ),
-                                  )}
-                                </DropdownMenuRadioGroup>
-                              </DropdownMenuSubContent>
-                            </DropdownMenuSub>
-                          ) : null}
                           <DropdownMenuSeparator />
                           <DropdownMenuItem variant="destructive" onClick={() => setPendingDelete(group)}>
                             <Trash2Icon />

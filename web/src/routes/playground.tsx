@@ -38,6 +38,11 @@ interface Usage {
 }
 
 export function PlaygroundPage() {
+  const settings = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => api<{ effective: Record<string, number | string> }>('/admin/settings'),
+  })
+
   const catalog = useQuery({
     queryKey: ['ai', 'catalog'],
     queryFn: () => api<CatalogResponse>('/admin/ai/catalog'),
@@ -61,6 +66,7 @@ export function PlaygroundPage() {
   const selected = items.find((item) => item.alias === modelKey)
   // 后端未返回思考能力时按「未检测」处理，避免误显示为不支持
   const reasoningMode = selected?.reasoning_mode ?? 'unknown'
+  const globalEffort = String(settings.data?.effective?.['ai.reasoning_effort'] ?? '')
   const [input, setInput] = useState('')
   const [draft, setDraft] = useState('')
   const [streaming, setStreaming] = useState(false)
@@ -323,7 +329,7 @@ export function PlaygroundPage() {
                       value={effort || '__default__'}
                       onValueChange={(value) => setEffort(value === '__default__' ? '' : (value ?? ''))}
                       items={[
-                        { value: '__default__', label: `默认（${selected?.reasoning_default || '不指定'}）` },
+                        { value: '__default__', label: `默认（${globalEffort || '不指定'}）` },
                         ...(selected?.reasoning_efforts ?? []).map((item) => ({ value: item, label: item })),
                       ]}
                     >
@@ -333,7 +339,7 @@ export function PlaygroundPage() {
                       <SelectContent>
                         <SelectGroup>
                           <SelectItem value="__default__">
-                            默认（{selected?.reasoning_default || '不指定'}）
+                            默认（{globalEffort || '不指定'}）
                           </SelectItem>
                           {(selected?.reasoning_efforts ?? []).map((item) => (
                             <SelectItem key={item} value={item}>

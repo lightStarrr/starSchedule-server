@@ -57,6 +57,17 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 }
 
 // rawToInt 兼容 123 与 "123" 两种写法。
+func rawToString(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 {
+		return "", false
+	}
+	var v string
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return "", false
+	}
+	return v, true
+}
+
 func rawToInt(raw json.RawMessage) (int64, bool) {
 	if len(raw) == 0 {
 		return 0, false
@@ -84,6 +95,8 @@ type RuntimeSettings struct {
 	RegisterPerIPHour   int
 	LaunchRetentionDays int
 	AILogRetentionDays  int
+	// ReasoningEffort 是所有支持思考强度的模型共用的默认档位，空串表示不指定。
+	ReasoningEffort string
 }
 
 func (s *Store) GetRuntimeSettings(ctx context.Context, defaults RuntimeSettings) (RuntimeSettings, error) {
@@ -112,6 +125,9 @@ func (s *Store) GetRuntimeSettings(ctx context.Context, defaults RuntimeSettings
 	}
 	if v, ok := rawToInt(raw["ai.global_concurrency"]); ok && v >= 0 {
 		out.GlobalConcurrency = toI(v)
+	}
+	if v, ok := rawToString(raw["ai.reasoning_effort"]); ok {
+		out.ReasoningEffort = v
 	}
 	if v, ok := rawToInt(raw["device.register_per_ip_hour"]); ok && v >= 0 {
 		out.RegisterPerIPHour = toI(v)

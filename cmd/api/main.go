@@ -96,6 +96,7 @@ func main() {
 		RegisterPerIPHour:   60,
 		LaunchRetentionDays: 90,
 		AILogRetentionDays:  30,
+		ReasoningEffort:     "medium",
 	}
 	settings := service.NewSettingsService(st, rd, defaults)
 	catalog := service.NewAICatalog(st, rd, box)

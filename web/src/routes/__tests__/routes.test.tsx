@@ -226,7 +226,8 @@ describe('管理后台页面渲染', () => {
 
   it('模型页展示供应商与模型 ID', async () => {
     renderAt('/ai/models')
-    expect(await screen.findByText('DeepSeek Chat')).toBeInTheDocument()
+    // 页头的默认模型下拉也会显示同名模型，这里只要求至少出现一次
+    expect((await screen.findAllByText('DeepSeek Chat')).length).toBeGreaterThan(0)
     expect(screen.getAllByText('deepseek').length).toBeGreaterThan(0)
   })
 })

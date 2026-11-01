@@ -173,7 +173,7 @@
 - `is_default` 标记默认模型，客户端不传 `model` 时使用它。
 - **`default` 可能是空串**（后台默认模型在两次查询之间被关闭）：此时 `is_default` 全为 `false`，客户端应兜底取 `items[0]`。
 - 没有可用模型时 `503 AI_NOT_CONFIGURED`（客户端隐藏 AI 入口）。
-- `reasoning.mode`：`effort` 可设置强度、`fixed` 固定带思考（不能传）、`none` 不支持、`unknown` 尚未检测；`reasoning.default` 是客户端不传时服务端实际使用的档位。
+- `reasoning.mode`：`effort` 可设置强度、`fixed` 固定带思考（不能传）、`none` 不支持、`unknown` 尚未检测；`reasoning.default` 是后台配置的**全局**默认档位（不传 `reasoning_effort` 时使用），仅 `effort` 模型有意义。
 - 缓存：响应带 `ETag` 与 `Cache-Control: private, max-age=60`；带 `If-None-Match` 命中时返回 `304`，此时**没有 body**，但 `X-Server-Time` 头仍是最新的。
 
 ## 7. GET /ai/config
@@ -220,7 +220,7 @@
 | `messages` | array | 是 | 1–100 条；`role ∈ {system,user,assistant}`；整段 ≤131072 字节，超出返回 `413 PAYLOAD_TOO_LARGE` |
 | `top_p` | float | 否 | 0–1 |
 | `stop` | string[] | 否 | ≤4 条 |
-| `reasoning_effort` | string | 否 | `minimal` / `low` / `medium` / `high`；不传则用该模型配置的默认档位。模型不支持时返回 `400 INVALID_ARGUMENT` |
+| `reasoning_effort` | string | 否 | `minimal` / `low` / `medium` / `high`；不传则用后台配置的全局默认档位。模型不支持或该档位不在模型支持列表时返回 `400 INVALID_ARGUMENT` |
 | `stream` | bool | 否 | 默认 `false` |
 | `model` | string | 否 | 取 `/ai/models` 里的 `alias`；省略则用默认模型。不存在或未启用返回 `400 MODEL_NOT_AVAILABLE` |
 

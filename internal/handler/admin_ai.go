@@ -40,6 +40,14 @@ func (d *Deps) providerJSON(p *model.Provider) gin.H {
 	}
 }
 
+// reasoningDefaultFor 只有可设置档位的模型才对外暴露默认值。
+func reasoningDefaultFor(mode, global string) string {
+	if mode != "effort" {
+		return ""
+	}
+	return global
+}
+
 // reasoningJSON 是给客户端看的思考能力描述。
 func reasoningJSON(mode string, efforts []string, def string) gin.H {
 	if efforts == nil {
@@ -355,11 +363,6 @@ func (d *Deps) detectAndStore(ctx context.Context, m *model.ProviderModel) (stri
 	patch := postgres.ModelPatch{
 		ReasoningMode:    &mode,
 		ReasoningEfforts: &efforts,
-	}
-	// 支持设置档位但还没配默认值时，给一个稳妥的 medium
-	if mode == "effort" && m.ReasoningDefault == "" {
-		def := "medium"
-		patch.ReasoningDefault = &def
 	}
 	if _, err := d.Store.UpdateModel(ctx, m.ID, patch); err != nil {
 		d.Logger.Warn("写回思考强度能力失败", "model", m.ModelID, "error", err)

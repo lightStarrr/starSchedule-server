@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -42,6 +43,7 @@ func (d *Deps) AIModels(c *gin.Context) {
 		current = snap.Alias
 	}
 
+	settings := d.Settings.Get(ctx)
 	items := make([]gin.H, 0, len(entries))
 	for _, e := range entries {
 		items = append(items, gin.H{
@@ -51,7 +53,8 @@ func (d *Deps) AIModels(c *gin.Context) {
 			"context_window":  e.ContextWindow,
 			"supports_stream": true,
 			"is_default":      e.Alias == current,
-			"reasoning":       reasoningJSON(e.ReasoningMode, e.ReasoningEfforts, e.ReasoningDefault),
+			"reasoning": reasoningJSON(e.ReasoningMode, e.ReasoningEfforts,
+				reasoningDefaultFor(e.ReasoningMode, settings.ReasoningEffort)),
 		})
 	}
 	// ETag 只覆盖「内容」部分（不含 server_time），命中时返回 304，
@@ -116,7 +119,8 @@ func (d *Deps) AIConfig(c *gin.Context) {
 			"display_name":    snap.DisplayName,
 			"context_window":  snap.ContextWindow,
 			"supports_stream": true,
-			"reasoning":       reasoningJSON(snap.ReasoningMode, snap.ReasoningEfforts, snap.ReasoningDefault),
+			"reasoning": reasoningJSON(snap.ReasoningMode, snap.ReasoningEfforts,
+				reasoningDefaultFor(snap.ReasoningMode, settings.ReasoningEffort)),
 		},
 		"limits": gin.H{
 			"rpm":               settings.RPMPerDevice,
@@ -289,10 +293,14 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 	reasoningEffort := ""
 	switch snap.ReasoningMode {
 	case "effort":
-		// 客户端没传就用模型配置的默认档位
+		// 客户端没传就用全局默认档位；模型不支持该档位时不下发
 		reasoningEffort = req.ReasoningEffort
 		if reasoningEffort == "" {
-			reasoningEffort = snap.ReasoningDefault
+			reasoningEffort = settings.ReasoningEffort
+		}
+		if reasoningEffort != "" && len(snap.ReasoningEfforts) > 0 &&
+			!slices.Contains(snap.ReasoningEfforts, reasoningEffort) {
+			reasoningEffort = ""
 		}
 	case "fixed":
 		if req.ReasoningEffort != "" {

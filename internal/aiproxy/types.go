@@ -77,6 +77,12 @@ type streamChunk struct {
 	} `json:"usage"`
 }
 
+// DefaultTemperature 客户端不传时使用的温度，避免上游默认值各不相同。
+const DefaultTemperature = 0.7
+
+// MsgInputTooLarge 是 messages 超限时的固定文案，handler 据此返回 413。
+const MsgInputTooLarge = "messages 内容过长，请精简上下文"
+
 // Validate 做服务端侧校验，返回中文错误信息。
 func (r *ChatRequest) Validate(maxOutput int, maxInputBytes int) string {
 	if len(r.Messages) == 0 {
@@ -98,7 +104,7 @@ func (r *ChatRequest) Validate(maxOutput int, maxInputBytes int) string {
 		total += len(m.Content)
 	}
 	if total > maxInputBytes {
-		return "messages 内容过长，请精简上下文"
+		return MsgInputTooLarge
 	}
 	if r.Temperature != nil && (*r.Temperature < 0 || *r.Temperature > 2) {
 		return "temperature 必须在 0–2 之间"
@@ -122,10 +128,17 @@ func (r *ChatRequest) BuildUpstream(model string, maxOutput int, stream bool) up
 	if r.MaxTokens != nil && *r.MaxTokens > 0 && *r.MaxTokens < maxOutput {
 		maxTokens = *r.MaxTokens
 	}
+	// 客户端没传 temperature 时显式下发默认值：上游默认常是 1.0，行为不可预期
+	temperature := r.Temperature
+	if temperature == nil {
+		def := DefaultTemperature
+		temperature = &def
+	}
+
 	out := upstreamRequest{
 		Model:       model,
 		Messages:    r.Messages,
-		Temperature: r.Temperature,
+		Temperature: temperature,
 		TopP:        r.TopP,
 		MaxTokens:   maxTokens,
 		Stream:      stream,

@@ -122,7 +122,15 @@ func (d *Deps) AdminSetDeviceBan(c *gin.Context) {
 		return
 	}
 	var req dto.BanRequest
-	_ = c.ShouldBindJSON(&req)
+	// body 可选；但超过上限时必须显式报错，不能当成「空 body」继续处理
+	if err := c.ShouldBindJSON(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			respond.Error(c, http.StatusRequestEntityTooLarge, respond.CodePayloadTooLarge,
+				"请求体过大，请检查请求内容", nil)
+			return
+		}
+	}
 
 	ctx := c.Request.Context()
 	dev, err := d.Store.SetDeviceBanned(ctx, id, req.Banned, req.Reason)

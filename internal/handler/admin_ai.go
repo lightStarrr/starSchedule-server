@@ -104,8 +104,7 @@ func (d *Deps) AdminListProviders(c *gin.Context) {
 // AdminCreateProvider POST /api/v1/admin/ai/providers
 func (d *Deps) AdminCreateProvider(c *gin.Context) {
 	var req dto.ProviderRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.InvalidArgument(c, "参数校验失败："+err.Error())
+	if !respond.BindJSON(c, &req) {
 		return
 	}
 	if req.APIKey == "" {
@@ -139,8 +138,7 @@ func (d *Deps) AdminUpdateProvider(c *gin.Context) {
 		return
 	}
 	var req dto.ProviderRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.InvalidArgument(c, "参数校验失败："+err.Error())
+	if !respond.BindJSON(c, &req) {
 		return
 	}
 	enabled := true
@@ -279,8 +277,7 @@ func (d *Deps) AdminListModels(c *gin.Context) {
 // 以模型为单位启停：开启时只让指定供应商那一行可用，其余供应商的同名模型关闭。
 func (d *Deps) AdminSetModelAvailability(c *gin.Context) {
 	var req dto.ModelAvailabilityRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.InvalidArgument(c, "参数校验失败："+err.Error())
+	if !respond.BindJSON(c, &req) {
 		return
 	}
 	ctx := c.Request.Context()
@@ -352,8 +349,7 @@ func (d *Deps) AdminSetModelAvailability(c *gin.Context) {
 // AdminCreateModel POST /api/v1/admin/ai/models
 func (d *Deps) AdminCreateModel(c *gin.Context) {
 	var req dto.ModelCreateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.InvalidArgument(c, "参数校验失败："+err.Error())
+	if !respond.BindJSON(c, &req) {
 		return
 	}
 	providerID, _ := uuid.Parse(req.ProviderID)
@@ -382,8 +378,7 @@ func (d *Deps) AdminUpdateModel(c *gin.Context) {
 		return
 	}
 	var req dto.ModelPatchRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.InvalidArgument(c, "参数校验失败："+err.Error())
+	if !respond.BindJSON(c, &req) {
 		return
 	}
 	m, err := d.Store.UpdateModel(c.Request.Context(), id,
@@ -408,8 +403,7 @@ func (d *Deps) AdminUpdateModel(c *gin.Context) {
 // AdminBulkDeleteModels POST /api/v1/admin/ai/models/bulk-delete
 func (d *Deps) AdminBulkDeleteModels(c *gin.Context) {
 	var req dto.BulkDeleteModelsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.InvalidArgument(c, "参数校验失败："+err.Error())
+	if !respond.BindJSON(c, &req) {
 		return
 	}
 	ctx := c.Request.Context()

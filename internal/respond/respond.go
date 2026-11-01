@@ -2,6 +2,8 @@
 package respond
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -66,6 +68,22 @@ func InvalidArgument(c *gin.Context, message string) {
 
 func Unauthenticated(c *gin.Context, message string) {
 	Error(c, http.StatusUnauthorized, CodeUnauthenticated, message, nil)
+}
+
+// BindJSON 解析请求体：超过中间件设置的上限返回 413，其余解析/校验失败返回 400。
+// 返回 false 时调用方应直接 return。
+func BindJSON(c *gin.Context, obj any) bool {
+	if err := c.ShouldBindJSON(obj); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			Error(c, http.StatusRequestEntityTooLarge, CodePayloadTooLarge,
+				fmt.Sprintf("请求体超过 %d 字节上限", tooLarge.Limit), nil)
+			return false
+		}
+		InvalidArgument(c, "参数校验失败："+err.Error())
+		return false
+	}
+	return true
 }
 
 func Internal(c *gin.Context, message string) {

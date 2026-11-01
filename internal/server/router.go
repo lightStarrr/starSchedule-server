@@ -65,7 +65,8 @@ func NewRouter(d *handler.Deps, cfg *config.Config) *gin.Engine {
 		Key:    middleware.ClientIPKey,
 	})
 
-	v1 := r.Group("/api/v1")
+	// JSON 请求体上限：超过会被 respond.BindJSON 转成 413 PAYLOAD_TOO_LARGE
+	v1 := r.Group("/api/v1", middleware.BodyLimit(1<<20))
 
 	// 设备侧
 	v1.POST("/devices/register", registerLimit, d.RegisterDevice)

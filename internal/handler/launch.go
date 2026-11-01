@@ -16,8 +16,7 @@ import (
 // session_id 重复时同样返回 204（客户端重试是常态，不当作错误）。
 func (d *Deps) ReportLaunch(c *gin.Context) {
 	var req dto.LaunchRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.InvalidArgument(c, "参数校验失败："+err.Error())
+	if !respond.BindJSON(c, &req) {
 		return
 	}
 	if strings.TrimSpace(req.SessionID) == "" {

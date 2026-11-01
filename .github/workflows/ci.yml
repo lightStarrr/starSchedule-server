@@ -132,6 +132,21 @@ jobs:
           curl -fsS http://127.0.0.1:8080/api/v1/devices/me -H "Authorization: Bearer $TOKEN"
           curl -fsS -o /dev/null -w 'admin_ui=%{http_code}\n' http://127.0.0.1:8080/admin/
 
+          # 契约：body 超 1 MiB → 413 PAYLOAD_TOO_LARGE
+          python3 -c "print('{\"messages\":[{\"role\":\"user\",\"content\":\"' + 'a'*1100000 + '\"}]}')" > /tmp/big.json
+          CODE=$(curl -s -o /tmp/big_resp.json -w '%{http_code}' -X POST http://127.0.0.1:8080/api/v1/ai/chat/completions \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/big.json)
+          echo "body_limit=$CODE"
+          [ "$CODE" = "413" ] || { echo "期望 413，实际 $CODE"; cat /tmp/big_resp.json; exit 1; }
+          grep -q 'PAYLOAD_TOO_LARGE' /tmp/big_resp.json || { echo "错误码不是 PAYLOAD_TOO_LARGE"; cat /tmp/big_resp.json; exit 1; }
+
+          # 契约：messages 超 131072 字节但 body 未超 1 MiB → 同样 413
+          python3 -c "print('{\"messages\":[{\"role\":\"user\",\"content\":\"' + 'a'*200000 + '\"}]}')" > /tmp/msg.json
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8080/api/v1/ai/chat/completions \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/msg.json)
+          echo "message_limit=$CODE"
+          [ "$CODE" = "413" ] || { echo "期望 413，实际 $CODE"; exit 1; }
+
   image:
     runs-on: ubuntu-latest
     needs: [backend, frontend]

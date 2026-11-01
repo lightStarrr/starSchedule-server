@@ -68,8 +68,7 @@ func (d *Deps) AdminGetSettings(c *gin.Context) {
 // 值传 null 表示恢复默认（删除覆盖行）。
 func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 	var req dto.SettingsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.InvalidArgument(c, "参数校验失败："+err.Error())
+	if !respond.BindJSON(c, &req) {
 		return
 	}
 	if len(req.Values) == 0 {

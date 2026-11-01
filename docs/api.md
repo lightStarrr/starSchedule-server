@@ -4,7 +4,8 @@
 - **编码**：`application/json; charset=utf-8`（SSE 除外）
 - **时间**：RFC3339 UTC，如 `2026-10-31T07:43:19Z`
 - **ID**：UUIDv7 字符串
-- **无信封**：成功直接返回业务对象；列表 `{items, next_cursor, has_more}`；失败 `{error:{...}}`
+- **无信封**：成功直接返回业务对象，失败 `{error:{...}}`
+- **列表**：分页列表为 `{items, next_cursor, has_more, total_estimate?}`；`/ai/models` 不是分页列表，结构见第 6 节
 - **幂等**：注册按 `install_id`，启动上报按 `session_id`，重试必须复用同一值
 
 ## 1. 请求头
@@ -13,11 +14,11 @@
 | --- | --- | --- | --- |
 | `Authorization: Bearer <token>` | 请求 | 除注册外必需 | 设备 access_token |
 | `Content-Type: application/json; charset=utf-8` | 请求 | 有 body 时 | |
-| `Accept` | 请求 | 否 | 默认 `application/json`；流式必须 `text/event-stream` |
-| `X-Client-Version` | 请求 | 是 | versionName，如 `1.2.0` |
-| `X-Client-Version-Code` | 请求 | 是 | versionCode，如 `120` |
+| `Accept` | 请求 | 否 | **服务端不校验**，是否流式只看 body 的 `stream` 字段 |
+| `X-Client-Version` | 请求 | 建议 | versionName，如 `1.2.0`；服务端不校验，仅便于排查 |
+| `X-Client-Version-Code` | 请求 | 建议 | versionCode，如 `120`；同上 |
 | `X-Request-Id` | 请求 | 否 | 客户端 UUID；缺失时服务端生成 |
-| `User-Agent` | 请求 | 是 | `StarSchedule-Android/1.2.0 (Android 14; sdk 34; arm64-v8a)` |
+| `User-Agent` | 请求 | 建议 | `StarSchedule-Android/1.2.0 (Android 14; sdk 34; arm64-v8a)`；只进访问日志 |
 | `X-Request-Id` | 响应 | 是 | 与请求一致或服务端生成，报错时展示给用户便于排查 |
 | `X-Server-Time` | 响应 | 是 | 服务端 UTC 时间，用于时钟校正 |
 | `X-Refresh-Token` | 响应 | 条件 | token 剩余 <7 天时出现，客户端静默替换本地 token |
@@ -62,12 +63,12 @@
 | --- | --- | --- | --- |
 | `install_id` | string | 是 | 首启生成并存 DataStore，UUID，长度 8–64 |
 | `android_id` | string | 是 | `Settings.Secure.ANDROID_ID`，8–64 位；服务端只存加盐哈希 |
-| `platform` | string | 是 | 固定 `android` |
+| `platform` | string | 否 | 省略时按 `android` 处理；显式传非 `android` 会 `400` |
 | `app_version` | string | 是 | ≤32 字符 |
 | `version_code` | int | 是 | 1–2100000000 |
 | `os_version` | string | 是 | 如 `14`，≤16 字符 |
 | `sdk_int` | int | 是 | 21–99 |
-| `arch` | string | 是 | `arm64-v8a` / `armeabi-v7a` / `x86_64` |
+| `arch` | string | 是 | ≤32 字符；服务端**不校验枚举**，传 `arm64-v8a` 等约定值即可 |
 | `locale`、`timezone` | string | 否 | 仅用于统计与排查 |
 
 响应 `200`：
@@ -85,7 +86,8 @@
 ```
 
 - 同 `install_id` 重复注册 → 同一 `device_id`、新 token、`is_new=false`
-- 限流：同 `install_id` 5 次/分，同 IP 60 次/时
+- 限流：同 `install_id` 5 次/分，同 IP 60 次/时（后台可改）
+- **静默重注册必须单飞**：多个请求同时 401 时只允许一个去注册，其余等待结果复用，否则会撞上 5 次/分的限制把自己限成 429
 - 错误：`400 INVALID_ARGUMENT` / `403 DEVICE_BANNED` / `429 RATE_LIMITED` / `500 INTERNAL`
 
 ## 4. GET /devices/me
@@ -166,7 +168,9 @@
 - 返回**所有后台已开启**的模型，客户端可以任选其一（可同时开启多个）。
 - `id` 是模型主键；多个供应商存在同名模型时，用它在请求里精确指定来源。
 - `is_default` 标记默认模型，客户端不传 `model` 时使用它。
+- **`default` 可能是空串**（后台默认模型在两次查询之间被关闭）：此时 `is_default` 全为 `false`，客户端应兜底取 `items[0]`。
 - 没有可用模型时 `503 AI_NOT_CONFIGURED`（客户端隐藏 AI 入口）。
+- 缓存：响应带 `ETag` 与 `Cache-Control: private, max-age=60`；带 `If-None-Match` 命中时返回 `304`，此时**没有 body**，但 `X-Server-Time` 头仍是最新的。
 
 ## 7. GET /ai/config
 
@@ -190,6 +194,8 @@
 }
 ```
 
+`model` 是默认模型（客户端不传 `model` 时使用），`limits.max_input_bytes` 是 messages 总量上限。
+
 ## 8. POST /ai/chat/completions
 
 请求体（只接受下列字段，其余忽略）：
@@ -210,8 +216,8 @@
 
 | 字段 | 类型 | 必需 | 约束 |
 | --- | --- | --- | --- |
-| `messages` | array | 是 | 1–100 条；`role ∈ {system,user,assistant}`；整段 ≤128KB |
-| `temperature` | float | 否 | 0–2，默认 0.7 |
+| `messages` | array | 是 | 1–100 条；`role ∈ {system,user,assistant}`；整段 ≤131072 字节，超出返回 `413 PAYLOAD_TOO_LARGE` |
+| `temperature` | float | 否 | 0–2；不传时服务端**显式下发 0.7**，不依赖上游默认值 |
 | `top_p` | float | 否 | 0–1 |
 | `max_tokens` | int | 否 | 超出服务端上限会被截断 |
 | `stop` | string[] | 否 | ≤4 条 |
@@ -269,9 +275,15 @@ data: {"error":{"code":"UPSTREAM_TIMEOUT","message":"模型响应超时，请重
 ```
 
 - 客户端以 `[DONE]` 与 `event: error` 作为终止条件，按 `delta.content` 增量拼接
-- **不自动重连**：重连会重复计费，由用户手动重发
+- **没有 `[DONE]` 的 EOF 视为异常终止**：上游连接中断时服务端直接断开，不发 `event: error`（只有 90 秒无数据才发 `UPSTREAM_TIMEOUT`）。客户端必须把「连接关闭但未收到 `[DONE]`」标记为失败，否则 UI 会停在半句话
+- **不自动重连**：重连会重复计费，由用户手动重发；服务端 90 秒无上游数据会发 `event: error` 后关闭
 
 错误（写 200 之前）：`400 INVALID_ARGUMENT` / `400 MODEL_NOT_AVAILABLE` / `401` / `403 DEVICE_BANNED` / `413 PAYLOAD_TOO_LARGE` / `429 RATE_LIMITED` / `429 AI_QUOTA_EXCEEDED` / `502 UPSTREAM_ERROR` / `503 QUOTA_SERVICE_UNAVAILABLE` / `504 UPSTREAM_TIMEOUT`
+
+- `413` 有两种来源：整个请求体超过 1 MiB，或 `messages` 合计超过 131072 字节
+- 三类 `429` 都带 `Retry-After`（秒）和 `details.retry_after`：本机 QPS 超限、并发闸门（固定 1 秒）、上游 429（透传上游值，没有则 3 秒）
+- 注意 `/ai/chat/completions` 的限流在 handler 内实现，**只有 `Retry-After`，不返回 `X-RateLimit-*`**（后者只出现在挂限流中间件的接口上）
+- 额度耗尽时额外带 `X-Quota-Remaining: 0`
 
 ## 9. GET /ai/usage
 
@@ -293,12 +305,12 @@ data: {"error":{"code":"UPSTREAM_TIMEOUT","message":"模型响应超时，请重
 | 400 | `INVALID_ARGUMENT` | 参数缺失/越界 | 修正后重试，不自动重试 |
 | 400 | `MODEL_NOT_AVAILABLE` | 传了未启用的 model | 重新拉 `/ai/config` |
 | 401 | `UNAUTHENTICATED` | 缺 token / 格式错 | 用 `install_id` 重新注册 |
-| 401 | `TOKEN_EXPIRED` / `TOKEN_INVALID` | 过期或验签失败 | 静默重注册后重放一次 |
+| 401 | `TOKEN_EXPIRED` / `TOKEN_INVALID` | 过期或验签失败 | 静默重注册后重放一次；**仅限尚未开始流式**，SSE 已收到帧后重放会二次计费 |
 | 403 | `DEVICE_BANNED` | 设备被封禁 | 停止上报与 AI，不重试 |
 | 404 | `NOT_FOUND` | 路径错误 | 客户端 bug |
-| 413 | `PAYLOAD_TOO_LARGE` | 请求体 / messages 过大 | 截断上下文后重试 |
-| 429 | `RATE_LIMITED` | 频率超限 | 按 `Retry-After` 退避 |
-| 429 | `AI_QUOTA_EXCEEDED` | 当日额度耗尽 | 展示额度与 `reset_at`，当日不再请求 |
+| 413 | `PAYLOAD_TOO_LARGE` | 请求体 >1 MiB，或 messages 合计 >131072 字节 | 截断历史后重试，不要原样重发 |
+| 429 | `RATE_LIMITED` | 频率超限（含上游 429、并发超限） | 读 `Retry-After` 退避；缺失时默认 3 秒 |
+| 429 | `AI_QUOTA_EXCEEDED` | 当日额度耗尽（响应头 `X-Quota-Remaining: 0`） | 展示额度与 `reset_at`，当日不再请求 |
 | 500 | `INTERNAL` | 服务端异常 | 指数退避重试 2 次 |
 | 502 | `UPSTREAM_ERROR` | 上游报错/密钥失效 | 提示「服务暂时不可用」 |
 | 503 | `AI_NOT_CONFIGURED` | 后台未配置模型 | 隐藏 AI 入口 |
@@ -313,9 +325,23 @@ data: {"error":{"code":"UPSTREAM_TIMEOUT","message":"模型响应超时，请重
 | `/devices/me` | 是 | 2 次 |
 | `/launches` | 是（session_id） | 最多 5 次；进程被杀后下次启动补投 |
 | `/ai/models`、`/ai/config`、`/ai/usage` | 是 | 2 次 |
-| `/ai/chat/completions` | 否 | 不自动重试 |
+| `/ai/chat/completions` | 否 | 不自动重试；SSE 未收到 `[DONE]` 就断开视为失败，由用户手动重发 |
 
-通用限流：单设备 600 次/分；启动上报 120 次/分；读接口 120 次/分。
+### 额度结算
+
+请求前会按「输入估算 + 最大输出」预扣额度，结束时按上游返回的实际用量差额结算：
+
+- 请求在任何阶段失败、或 SSE 中断，都会把预扣额度退回（可能整笔退，也可能按实际用量退差额）
+- 因此**客户端不要本地累加用量**，需要展示时重新拉 `/ai/usage`
+
+按接口的限流（都按设备维度，超限返回 `429 RATE_LIMITED` 且带 `Retry-After`）：
+
+| 接口 | 限制 |
+| --- | --- |
+| `POST /devices/register` | 同 `install_id` 5 次/分；同 IP 60 次/时 |
+| `GET /devices/me`、`/ai/models`、`/ai/config`、`/ai/usage` | 120 次/分 |
+| `POST /launches` | 120 次/分 |
+| `POST /ai/chat/completions` | 20 次/分 + 并发 2（都可在后台「设置」里改） |
 
 ## 11. Android 实现要点
 
@@ -323,5 +349,7 @@ data: {"error":{"code":"UPSTREAM_TIMEOUT","message":"模型响应超时，请重
 - SSE 用 `EventSource` 或手写 `BufferedSource.readUtf8Line()`：累积 `event:` 与多行 `data:`，遇空行派发
 - token 存 EncryptedSharedPreferences；收到 `X-Refresh-Token` 立即覆盖写入
 - 每次请求带 `X-Request-Id`（UUID，重试复用），异常提示带上它
+- 401 重注册用单飞（Mutex + 共享结果），否则并发请求会把自己限流
+- SSE 结束时校验最后一帧是 `[DONE]`；只收到 EOF 视为异常，UI 提示可重发
 - 启动上报在 `Application.onCreate` 与 `ProcessLifecycleOwner.onStart` 各触发一次，各自生成新的 `session_id`
 - 客户端不得内置任何上游 API Key，全部经 `/ai/chat/completions`

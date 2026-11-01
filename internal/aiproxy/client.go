@@ -9,15 +9,18 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // UpstreamError 统一映射上游失败，供 handler 转成客户端错误码。
 type UpstreamError struct {
-	Kind       string // timeout | unavailable | bad_request | server_error
+	Kind       string // timeout | unavailable | bad_request | rate_limited | server_error
 	StatusCode int
 	Message    string
+	// RetryAfter 来自上游 429 的 Retry-After 头（秒），为 0 表示上游没给。
+	RetryAfter int
 }
 
 func (e *UpstreamError) Error() string { return e.Message }
@@ -86,7 +89,8 @@ func (c *Client) OpenChat(ctx context.Context, baseURL, apiKey string, body upst
 			} else if resp.StatusCode < 500 {
 				kind = "bad_request"
 			}
-			return nil, &UpstreamError{Kind: kind, StatusCode: resp.StatusCode, Message: msg}
+			retryAfter, _ := strconv.Atoi(resp.Header.Get("Retry-After"))
+			return nil, &UpstreamError{Kind: kind, StatusCode: resp.StatusCode, Message: msg, RetryAfter: retryAfter}
 		}
 		return resp, nil
 	}

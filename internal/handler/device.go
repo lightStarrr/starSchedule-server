@@ -19,8 +19,7 @@ func serverNow() time.Time { return time.Now().UTC() }
 // RegisterDevice POST /api/v1/devices/register
 func (d *Deps) RegisterDevice(c *gin.Context) {
 	var req dto.RegisterRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.InvalidArgument(c, "参数校验失败："+err.Error())
+	if !respond.BindJSON(c, &req) {
 		return
 	}
 

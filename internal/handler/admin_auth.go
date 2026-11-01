@@ -43,8 +43,7 @@ func (d *Deps) cookieSecure(c *gin.Context) bool {
 // AdminLogin POST /api/v1/admin/login
 func (d *Deps) AdminLogin(c *gin.Context) {
 	var req dto.AdminLoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.InvalidArgument(c, "参数校验失败："+err.Error())
+	if !respond.BindJSON(c, &req) {
 		return
 	}
 	res, err := d.Admin.Login(c.Request.Context(), req.Username, req.Password)

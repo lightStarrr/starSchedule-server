@@ -2,6 +2,9 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -51,11 +54,32 @@ func (d *Deps) AIModels(c *gin.Context) {
 			"is_default":      e.Alias == current,
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{
+	// ETag 只覆盖「内容」部分（不含 server_time），命中时返回 304，
+	// 客户端仍可从 X-Server-Time 头拿到新的校时时间。
+	raw, err := json.Marshal(gin.H{"items": items, "default": current})
+	if err != nil {
+		respond.Internal(c, "生成响应失败")
+		return
+	}
+	sum := sha256.Sum256(raw)
+	etag := `"` + hex.EncodeToString(sum[:8]) + `"`
+	c.Header("ETag", etag)
+	c.Header("Cache-Control", "private, max-age=60")
+	if c.GetHeader("If-None-Match") == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+
+	body, err := json.Marshal(gin.H{
 		"items":       items,
 		"default":     current,
 		"server_time": serverNow(),
 	})
+	if err != nil {
+		respond.Internal(c, "生成响应失败")
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", body)
 }
 
 // AIConfig GET /api/v1/ai/config
@@ -158,8 +182,7 @@ func (d *Deps) AIChat(c *gin.Context) {
 		return
 	}
 	var req aiproxy.ChatRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.InvalidArgument(c, "请求体解析失败："+err.Error())
+	if !respond.BindJSON(c, &req) {
 		return
 	}
 	deviceID := dev.ID
@@ -176,8 +199,7 @@ func (d *Deps) AIChat(c *gin.Context) {
 func (d *Deps) AIPlayground(c *gin.Context) {
 	admin := adminFromAny(c)
 	var req aiproxy.ChatRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respond.InvalidArgument(c, "请求体解析失败："+err.Error())
+	if !respond.BindJSON(c, &req) {
 		return
 	}
 	var adminID *uuid.UUID
@@ -201,7 +223,13 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 	requestID := respond.RequestID(c)
 
 	settings := d.Settings.Get(ctx)
-	if msg := req.Validate(settings.MaxOutputTokens, 131072); msg != "" {
+	const maxInputBytes = 131072
+	if msg := req.Validate(settings.MaxOutputTokens, maxInputBytes); msg != "" {
+		if msg == aiproxy.MsgInputTooLarge {
+			respond.Error(c, http.StatusRequestEntityTooLarge, respond.CodePayloadTooLarge,
+				msg, map[string]any{"max_input_bytes": maxInputBytes})
+			return
+		}
 		respond.InvalidArgument(c, msg)
 		return
 	}
@@ -250,8 +278,9 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 	inflightKey := "inflight:ai:" + caller.RateKey
 	if ok, ierr := d.Redis.AcquireInflight(ctx, inflightKey, settings.InflightPerDevice, 5*time.Minute); ierr == nil {
 		if !ok {
+			c.Header("Retry-After", "1")
 			respond.Error(c, http.StatusTooManyRequests, respond.CodeRateLimited,
-				"并发请求过多，请等待当前对话结束", nil)
+				"并发请求过多，请等待当前对话结束", map[string]any{"retry_after": 1})
 			return
 		}
 		defer d.Redis.ReleaseInflight(context.WithoutCancel(ctx), inflightKey)
@@ -433,8 +462,13 @@ func (d *Deps) respondUpstreamError(c *gin.Context, err error) {
 				"模型响应超时，请重试", nil)
 			return
 		case "rate_limited":
+			retry := up.RetryAfter
+			if retry <= 0 {
+				retry = 3
+			}
+			c.Header("Retry-After", strconv.Itoa(retry))
 			respond.Error(c, http.StatusTooManyRequests, respond.CodeRateLimited,
-				"上游服务繁忙，请稍后重试", nil)
+				"上游服务繁忙，请稍后重试", map[string]any{"retry_after": retry})
 			return
 		}
 		respond.Error(c, http.StatusBadGateway, respond.CodeUpstreamError,

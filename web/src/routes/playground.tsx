@@ -50,11 +50,11 @@ export function PlaygroundPage() {
   // 默认选后台「当前启用」的模型，没有则取第一个可用的
   useEffect(() => {
     if (modelKey) return
-    const preferred = catalog.data?.active.id
-    if (preferred && items.some((item) => item.id === preferred)) {
+    const preferred = catalog.data?.active.alias
+    if (preferred && items.some((item) => item.alias === preferred)) {
       setModelKey(preferred)
     } else if (items.length > 0) {
-      setModelKey(items[0].id)
+      setModelKey(items[0].alias)
     }
   }, [catalog.data, items, modelKey])
 
@@ -132,8 +132,8 @@ export function PlaygroundPage() {
 
   // 模型被删除/停用后，下拉选中项可能失效，自动回落到第一个可用模型
   useEffect(() => {
-    if (modelKey && !items.some((item) => item.id === modelKey)) {
-      setModelKey(items[0]?.id ?? '')
+    if (modelKey && !items.some((item) => item.alias === modelKey)) {
+      setModelKey(items[0]?.alias ?? '')
     }
   }, [items, modelKey])
 
@@ -291,7 +291,7 @@ export function PlaygroundPage() {
                     value={modelKey}
                     onValueChange={(value) => setModelKey(value ?? '')}
                     items={items.map((item) => ({
-                      value: item.id,
+                      value: item.alias,
                       label: `${item.display_name}（${item.provider_name}）`,
                     }))}
                   >
@@ -301,7 +301,7 @@ export function PlaygroundPage() {
                     <SelectContent>
                       <SelectGroup>
                         {items.map((item) => (
-                          <SelectItem key={item.id} value={item.id}>
+                          <SelectItem key={item.alias} value={item.alias}>
                             {item.display_name}（{item.provider_name}）
                           </SelectItem>
                         ))}

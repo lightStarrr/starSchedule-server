@@ -45,7 +45,6 @@ func (d *Deps) AIModels(c *gin.Context) {
 	items := make([]gin.H, 0, len(entries))
 	for _, e := range entries {
 		items = append(items, gin.H{
-			"id":              e.ModelUUID.String(),
 			"alias":           e.Alias,
 			"display_name":    e.DisplayName,
 			"provider_name":   e.ProviderName,
@@ -112,7 +111,6 @@ func (d *Deps) AIConfig(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"model": gin.H{
-			"id":              snap.ModelUUID.String(),
 			"alias":           snap.Alias,
 			"display_name":    snap.DisplayName,
 			"context_window":  snap.ContextWindow,
@@ -237,12 +235,8 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 	var snap *service.CatalogSnapshot
 	var err error
 	if caller.AllowModelOverride && req.Model != "" {
-		// UUID 精确匹配（同名模型可能出现在多个供应商下），否则回退按 alias 匹配
-		if id, perr := uuid.Parse(req.Model); perr == nil {
-			snap, err = d.Catalog.SnapshotByID(ctx, id)
-		} else {
-			snap, err = d.Catalog.SnapshotByKey(ctx, req.Model)
-		}
+		// 同一个模型同时只会有一家供应商启用，alias 足以唯一定位
+		snap, err = d.Catalog.SnapshotByKey(ctx, req.Model)
 	} else {
 		snap, err = d.Catalog.Snapshot(ctx)
 	}

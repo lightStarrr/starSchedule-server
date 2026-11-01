@@ -146,7 +146,8 @@ func (s *Store) UpsertFetchedModels(ctx context.Context, providerID uuid.UUID, i
 		}
 		batch.Queue(`
 			INSERT INTO ai_provider_models (id, provider_id, model_id, alias, display_name, context_window, source, enabled)
-			VALUES ($1, $2, $3, $4, $5, $6, 'fetched', true)
+			VALUES ($1, $2, $3, $4, $5, $6, 'fetched',
+			        NOT EXISTS (SELECT 1 FROM ai_provider_models x WHERE x.model_id = $3 AND x.enabled))
 			ON CONFLICT (provider_id, model_id) DO UPDATE SET
 				display_name = EXCLUDED.display_name,
 				context_window = CASE WHEN EXCLUDED.context_window > 0
@@ -212,7 +213,9 @@ func (s *Store) CreateModel(ctx context.Context, in ModelInput) (*model.Provider
 	}
 	m, err := scanModel(s.pool.QueryRow(ctx, `
 		INSERT INTO ai_provider_models (id, provider_id, model_id, alias, display_name, context_window, source, enabled)
-		VALUES ($1, $2, $3, $4, $5, $6, 'manual', $7) RETURNING `+modelColumns,
+		VALUES ($1, $2, $3, $4, $5, $6, 'manual',
+		        $7 AND NOT EXISTS (SELECT 1 FROM ai_provider_models x WHERE x.model_id = $3 AND x.enabled))
+		RETURNING `+modelColumns,
 		uuid.Must(uuid.NewV7()), in.ProviderID, in.ModelID, alias, display, in.ContextWindow, in.Enabled))
 	if err != nil && isUniqueViolation(err) {
 		return nil, store.ErrConflict

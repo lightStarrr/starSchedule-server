@@ -108,13 +108,46 @@ func TestAICatalogIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("按模型 ID 精确解析", func(t *testing.T) {
-		snap, err := cat.SnapshotByID(ctx, second.ID)
+	t.Run("同一模型在第二家供应商下默认不启用", func(t *testing.T) {
+		other, err := cat.CreateProvider(ctx, service.ProviderPayload{
+			Name:           "it-other-" + suffix,
+			BaseURL:        "https://example.invalid/v1",
+			APIKey:         "sk-test-other-" + suffix,
+			Enabled:        true,
+			TimeoutSeconds: 10,
+		})
 		if err != nil {
-			t.Fatalf("SnapshotByID 失败: %v", err)
+			t.Fatalf("创建第二家供应商失败: %v", err)
 		}
-		if snap.ModelUUID != second.ID || snap.Alias != second.Alias {
-			t.Fatalf("解析结果不匹配: %+v", snap)
+		t.Cleanup(func() { _ = st.DeleteProvider(context.Background(), other.ID) })
+
+		dup, err := st.CreateModel(ctx, postgres.ModelInput{
+			ProviderID:    other.ID,
+			ModelID:       first.ModelID,
+			Alias:         "dup-" + first.ModelID,
+			DisplayName:   "dup",
+			ContextWindow: 8192,
+			Enabled:       true,
+		})
+		if err != nil {
+			t.Fatalf("创建同名模型失败: %v", err)
+		}
+		if dup.Enabled {
+			t.Fatal("同一模型已有启用的供应商，新行不应再启用")
+		}
+
+		entries, err := cat.ListEnabled(ctx)
+		if err != nil {
+			t.Fatalf("ListEnabled 失败: %v", err)
+		}
+		count := 0
+		for _, e := range entries {
+			if e.ModelID == first.ModelID {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("同一模型只应有一条启用记录，实际 %d 条", count)
 		}
 	})
 
@@ -138,7 +171,7 @@ func TestAICatalogIntegration(t *testing.T) {
 		if _, err := cat.Snapshot(ctx); !errors.Is(err, service.ErrAINotConfigured) {
 			t.Fatalf("期望 ErrAINotConfigured，实际 %v", err)
 		}
-		if _, err := cat.SnapshotByID(ctx, first.ID); !errors.Is(err, service.ErrModelNotFound) {
+		if _, err := cat.SnapshotByKey(ctx, first.Alias); !errors.Is(err, service.ErrModelNotFound) {
 			t.Fatalf("停用供应商的模型应不可解析，实际 %v", err)
 		}
 		// 管理端列表按供应商启用状态过滤

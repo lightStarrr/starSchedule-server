@@ -427,6 +427,18 @@ func (d *Deps) AdminUpdateModel(c *gin.Context) {
 	if !respond.BindJSON(c, &req) {
 		return
 	}
+	// 同一个模型只允许一家供应商启用，直接 PATCH 打开会破坏这个约束
+	if req.Enabled != nil && *req.Enabled {
+		if cur, cerr := d.Store.GetModel(c.Request.Context(), id); cerr == nil {
+			rows, _ := d.Store.ListModelsByModelID(c.Request.Context(), cur.ModelID)
+			for _, r := range rows {
+				if r.ID != cur.ID && r.Enabled {
+					respond.InvalidArgument(c, "该模型已有启用的供应商，请用「切换供应商」而不是直接启用")
+					return
+				}
+			}
+		}
+	}
 	m, err := d.Store.UpdateModel(c.Request.Context(), id,
 		postgresModelPatch(req))
 	if err != nil {

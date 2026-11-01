@@ -145,7 +145,6 @@
 {
   "items": [
     {
-      "id": "01JB8Z3K4M5N6P7Q8R9S0T1U2V",
       "alias": "deepseek-chat",
       "display_name": "DeepSeek Chat",
       "provider_name": "deepseek",
@@ -154,7 +153,6 @@
       "is_default": true
     },
     {
-      "id": "01JB9A4M5N6P7Q8R9S0T1U2VW",
       "alias": "deepseek-reasoner",
       "display_name": "DeepSeek Reasoner",
       "provider_name": "deepseek",
@@ -169,7 +167,7 @@
 ```
 
 - 返回**所有后台已开启**的模型，客户端可以任选其一（可同时开启多个）。
-- `id` 是模型主键；多个供应商存在同名模型时，用它在请求里精确指定来源。
+- 同一个模型只会有一家供应商处于启用状态，因此 `alias` 在可用列表里唯一，客户端直接用 `alias` 即可。
 - `is_default` 标记默认模型，客户端不传 `model` 时使用它。
 - **`default` 可能是空串**（后台默认模型在两次查询之间被关闭）：此时 `is_default` 全为 `false`，客户端应兜底取 `items[0]`。
 - 没有可用模型时 `503 AI_NOT_CONFIGURED`（客户端隐藏 AI 入口）。
@@ -179,7 +177,7 @@
 
 ```json
 {
-  "model": { "id": "01JB8Z3K4M5N6P7Q8R9S0T1U2V", "alias": "deepseek-chat", "display_name": "DeepSeek Chat", "context_window": 65536, "supports_stream": true },
+  "model": { "alias": "deepseek-chat", "display_name": "DeepSeek Chat", "context_window": 65536, "supports_stream": true },
   "limits": {
     "rpm": 20,
     "inflight": 2,
@@ -225,7 +223,7 @@
 | `max_tokens` | int | 否 | 超出服务端上限会被截断 |
 | `stop` | string[] | 否 | ≤4 条 |
 | `stream` | bool | 否 | 默认 `false` |
-| `model` | string | 否 | 取 `/ai/models` 里的 `id`（推荐，可区分同名模型）或 `alias`；省略则用默认模型。不存在或未启用返回 `400 MODEL_NOT_AVAILABLE` |
+| `model` | string | 否 | 取 `/ai/models` 里的 `alias`；省略则用默认模型。不存在或未启用返回 `400 MODEL_NOT_AVAILABLE` |
 
 **非流式** `200 application/json`：
 

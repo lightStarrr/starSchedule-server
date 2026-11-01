@@ -131,28 +131,6 @@ func (c *AICatalog) snapshotForEntry(ctx context.Context, e model.CatalogEntry) 
 	}, nil
 }
 
-// SnapshotByID 按模型主键解析配置，多个供应商存在同名模型时用它精确指定。
-func (c *AICatalog) SnapshotByID(ctx context.Context, id uuid.UUID) (*CatalogSnapshot, error) {
-	m, err := c.store.GetModel(ctx, id)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, ErrModelNotFound
-		}
-		return nil, err
-	}
-	if !m.Enabled {
-		return nil, ErrModelNotFound
-	}
-	return c.snapshotForEntry(ctx, model.CatalogEntry{
-		ProviderID:    m.ProviderID,
-		ModelUUID:     m.ID,
-		ModelID:       m.ModelID,
-		Alias:         m.Alias,
-		DisplayName:   m.DisplayName,
-		ContextWindow: m.ContextWindow,
-	})
-}
-
 func (c *AICatalog) storeInProcess(snap *CatalogSnapshot) {
 	c.mu.Lock()
 	cp := *snap

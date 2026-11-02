@@ -35,10 +35,18 @@ type LaunchInput struct {
 // Report 记录一次启动。客户端时钟不可信：偏差超窗口时一律用服务端时间。
 func (s *LaunchService) Report(ctx context.Context, dev *model.Device, in LaunchInput) (bool, error) {
 	now := time.Now().UTC()
+	// 缺少时间的在线上报使用接收时间；越界的客户端时间不用于覆盖设备元信息。
+	metadataAt := in.LaunchedAt
+	if metadataAt == nil {
+		metadataAt = &now
+	}
 	outsideWindow := in.LaunchedAt == nil ||
 		in.LaunchedAt.After(now.Add(10*time.Minute)) ||
 		in.LaunchedAt.Before(now.Add(-7*24*time.Hour))
 	if outsideWindow {
+		if in.LaunchedAt != nil {
+			metadataAt = nil
+		}
 		t := now
 		in.LaunchedAt = &t
 	}
@@ -75,5 +83,10 @@ func (s *LaunchService) Report(ctx context.Context, dev *model.Device, in Launch
 		Arch:       arch,
 		SessionID:  strings.TrimSpace(in.SessionID),
 		Extra:      in.Extra,
+		Metadata: postgres.DeviceMetadata{
+			ReportedAt: metadataAt,
+			AppVersion: strings.TrimSpace(in.AppVersion), VersionCode: in.VersionCode,
+			OSVersion: strings.TrimSpace(in.OSVersion), SDKInt: in.SDKInt, Arch: strings.TrimSpace(in.Arch),
+		},
 	})
 }

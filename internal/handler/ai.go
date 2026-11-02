@@ -108,10 +108,7 @@ func (d *Deps) AIConfig(c *gin.Context) {
 			requestCount = row.RequestCount
 		}
 	}
-	remaining := settings.DailyTokenQuota - used
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining := settings.RemainingTokens(used)
 
 	c.JSON(http.StatusOK, gin.H{
 		"model": gin.H{
@@ -123,6 +120,7 @@ func (d *Deps) AIConfig(c *gin.Context) {
 				reasoningDefaultFor(snap.ReasoningMode, snap.ReasoningEfforts, settings.ReasoningEffort)),
 		},
 		"limits": gin.H{
+			"quota_unlimited":   settings.QuotaUnlimited,
 			"rpm":               settings.RPMPerDevice,
 			"inflight":          settings.InflightPerDevice,
 			"max_output_tokens": settings.MaxOutputTokens,
@@ -154,13 +152,11 @@ func (d *Deps) AIUsage(c *gin.Context) {
 		return
 	}
 	used := row.PromptTokens + row.CompletionTokens
-	remaining := settings.DailyTokenQuota - used
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining := settings.RemainingTokens(used)
 	c.JSON(http.StatusOK, gin.H{
 		"date":             d.Device.Today().Format("2006-01-02"),
 		"daily_quota":      settings.DailyTokenQuota,
+		"quota_unlimited":  settings.QuotaUnlimited,
 		"used_tokens":      used,
 		"remaining_tokens": remaining,
 		"request_count":    row.RequestCount,
@@ -174,7 +170,7 @@ type chatCaller struct {
 	Source     string
 	RateKey    string
 	ApplyQuota bool
-	// AllowModelOverride 仅后台试跑开启：允许请求体指定任意已启用模型。
+	// AllowModelOverride 允许客户端及试跑按 alias 选择已启用模型。
 	AllowModelOverride bool
 }
 
@@ -242,7 +238,7 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 	var err error
 	if caller.AllowModelOverride && req.Model != "" {
 		// 同一个模型同时只会有一家供应商启用，alias 足以唯一定位
-		snap, err = d.Catalog.SnapshotByKey(ctx, req.Model)
+		snap, err = d.Catalog.SnapshotByAlias(ctx, req.Model)
 	} else {
 		snap, err = d.Catalog.Snapshot(ctx)
 	}
@@ -259,7 +255,7 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 		}
 		return
 	}
-	if !caller.AllowModelOverride && req.Model != "" && req.Model != snap.Alias && req.Model != snap.ModelID {
+	if !caller.AllowModelOverride && req.Model != "" && req.Model != snap.Alias {
 		respond.Error(c, http.StatusBadRequest, respond.CodeModelNotAvailable,
 			"指定的模型不可用，请重新获取配置", nil)
 		return
@@ -323,8 +319,12 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 	var charged int64
 	usageDate := d.Device.Today()
 	quotaReset := usageDate.AddDate(0, 0, 1)
-	// 额度为 0 视为不限量（后台可配）。
-	if caller.ApplyQuota && caller.DeviceID != nil && settings.DailyTokenQuota > 0 {
+	// 不限量期间也累计计费缓存，关闭开关后继续按当天总用量限制。
+	if caller.ApplyQuota && caller.DeviceID != nil && settings.QuotaUnlimited {
+		quotaKey = redisc.QuotaKey(caller.DeviceID.String(), usageDate.Format("2006-01-02"))
+	}
+	// 日额度由独立的不限量开关控制，频率和并发限制保持独立。
+	if caller.ApplyQuota && caller.DeviceID != nil && !settings.QuotaUnlimited {
 		quotaKey = redisc.QuotaKey(caller.DeviceID.String(), usageDate.Format("2006-01-02"))
 		charged = int64(promptEstimate + maxOutput)
 		ttl := time.Until(quotaReset) + time.Hour
@@ -340,6 +340,7 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 				"今日 AI 额度已用完，可在额度重置后继续使用",
 				map[string]any{
 					"daily_quota":      settings.DailyTokenQuota,
+					"quota_unlimited":  settings.QuotaUnlimited,
 					"used":             used,
 					"reset_at":         quotaReset.Format(time.RFC3339),
 					"requested_tokens": charged,

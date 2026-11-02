@@ -248,7 +248,7 @@ export function DashboardPage() {
                     <div className="flex size-8 items-center justify-center rounded-md bg-muted">
                       <BotIcon className="size-4" aria-hidden />
                     </div>
-                    <div className="flex flex-col">
+                    <div className="flex min-w-0 flex-col break-all">
                       <span className="text-sm font-medium">{active.data.active.display_name}</span>
                       <span className="text-xs text-muted-foreground">
                         {active.data.active.provider_name} · {active.data.active.alias}

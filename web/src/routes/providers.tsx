@@ -296,6 +296,11 @@ export function ProvidersPage() {
           <Skeleton className="h-48 w-full" />
           <Skeleton className="h-48 w-full" />
         </div>
+      ) : providers.isError ? (
+        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border p-4 text-sm">
+          <p>供应商加载失败：{errorMessage(providers.error)}</p>
+          <Button size="sm" variant="outline" onClick={() => void providers.refetch()}>重试</Button>
+        </div>
       ) : items.length === 0 ? (
         <Empty className="border">
           <EmptyHeader>
@@ -321,7 +326,7 @@ export function ProvidersPage() {
               <Card key={provider.id}>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    {provider.name}
+                    <span className="min-w-0 break-all">{provider.name}</span>
                     {!provider.enabled ? <Badge variant="outline">已停用</Badge> : null}
                   </CardTitle>
                   <CardDescription className="truncate font-mono text-xs">

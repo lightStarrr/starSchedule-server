@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { ThemeProvider } from 'next-themes'
@@ -43,6 +43,8 @@ const provider = {
 }
 
 const model = {
+	 reasoning_mode: 'effort',
+	 reasoning_efforts: ['low', 'medium', 'high'],
   id: 'm1',
   provider_id: 'p1',
   provider_name: 'deepseek',
@@ -93,6 +95,7 @@ const device = {
 const settings = {
   overrides: { 'ai.rpm_per_device': 10 },
   effective: {
+    'ai.quota_unlimited': false,
     'ai.daily_token_quota': 200000,
     'ai.rpm_per_device': 10,
     'ai.inflight_per_device': 2,
@@ -103,6 +106,7 @@ const settings = {
     'retention.ai_log_days': 30,
   },
   defaults: {
+    'ai.quota_unlimited': false,
     'ai.daily_token_quota': 200000,
     'ai.rpm_per_device': 20,
     'ai.inflight_per_device': 2,
@@ -221,7 +225,7 @@ describe('管理后台页面渲染', () => {
 
   it('模型页给默认模型打标', async () => {
     renderAt('/ai/models')
-    expect(await screen.findByText('默认')).toBeInTheDocument()
+    expect((await screen.findAllByText('默认')).length).toBeGreaterThan(0)
   })
 
   it('模型页展示供应商与模型 ID', async () => {
@@ -229,5 +233,35 @@ describe('管理后台页面渲染', () => {
     // 页头的默认模型下拉也会显示同名模型，这里只要求至少出现一次
     expect((await screen.findAllByText('DeepSeek Chat')).length).toBeGreaterThan(0)
     expect(screen.getAllByText('deepseek').length).toBeGreaterThan(0)
+  })
+
+  it('模型页展示具体支持的思考档位', async () => {
+    renderAt('/ai/models')
+    for (const effort of ['low', 'medium', 'high']) {
+      expect((await screen.findAllByText(effort)).length).toBeGreaterThan(0)
+    }
+  })
+
+  it('不限量开关禁用日额度编辑并提交布尔值', async () => {
+    renderAt('/settings')
+    const toggle = await screen.findByRole('switch', { name: '每日 Token 不限量' })
+    fireEvent.click(toggle)
+    expect(screen.getByLabelText('每设备每日 Token 额度')).toHaveAttribute('readonly')
+    fireEvent.click(screen.getByRole('button', { name: '保存配置' }))
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([, options]) => {
+      if (options?.method !== 'PUT' || typeof options.body !== 'string') return false
+      const values = JSON.parse(options.body).values
+      return values['ai.quota_unlimited'] === true && values['ai.daily_token_quota'] === 200000
+    })).toBe(true))
+  })
+
+  it('供应商加载失败时显示错误和重试入口', async () => {
+    const original = fetch
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes('/admin/ai/providers') ? Promise.resolve(json({ error: { message: '服务不可用' } }, 500)) : original(input, init)))
+    renderAt('/ai/providers')
+    expect(await screen.findByText('供应商加载失败：服务不可用')).toBeInTheDocument()
+    expect(screen.queryByText('还没有供应商')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
   })
 })

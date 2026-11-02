@@ -31,9 +31,9 @@ type LaunchRequest struct {
 	LaunchedAt  *time.Time     `json:"launched_at"`
 	LaunchType  string         `json:"launch_type" binding:"omitempty,oneof=cold warm"`
 	AppVersion  string         `json:"app_version" binding:"omitempty,max=32"`
-	VersionCode int            `json:"version_code"`
+	VersionCode int            `json:"version_code" binding:"omitempty,min=1,max=2100000000"`
 	OSVersion   string         `json:"os_version" binding:"omitempty,max=16"`
-	SDKInt      int            `json:"sdk_int"`
+	SDKInt      int            `json:"sdk_int" binding:"omitempty,min=1,max=1000"`
 	Arch        string         `json:"arch" binding:"omitempty,max=32"`
 	Extra       map[string]any `json:"extra"`
 }

@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { z } from 'zod'
@@ -19,12 +19,14 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/c
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
+import { Switch } from '@/components/ui/switch'
 import { PageHeader } from '@/components/page-header'
 import { api, errorMessage } from '@/lib/api'
 import type { NumericSettingKey, SettingsPayload } from '@/lib/types'
 
 const schema = z.object({
-  dailyTokenQuota: z.number().int().min(0),
+  quotaUnlimited: z.boolean(),
+  dailyTokenQuota: z.number().int().min(1, '额度必须大于 0，不限量请开启开关'),
   rpmPerDevice: z.number().int().min(0).max(10_000),
   inflightPerDevice: z.number().int().min(0).max(100),
   globalConcurrency: z.number().int().min(0).max(10_000),
@@ -37,7 +39,7 @@ const schema = z.object({
 type SettingsForm = z.infer<typeof schema>
 
 const fields: {
-  name: keyof SettingsForm
+  name: Exclude<keyof SettingsForm, 'quotaUnlimited'>
   // 这里只承载数值型配置；ai.reasoning_effort 是字符串枚举，在模型页单独维护。
   key: NumericSettingKey
   label: string
@@ -104,6 +106,7 @@ export function SettingsPage() {
   const form = useForm<SettingsForm>({
     resolver: zodResolver(schema),
     defaultValues: {
+      quotaUnlimited: false,
       dailyTokenQuota: 200000,
       rpmPerDevice: 20,
       inflightPerDevice: 2,
@@ -114,11 +117,13 @@ export function SettingsPage() {
       aiLogRetentionDays: 30,
     },
   })
+  const quotaUnlimited = useWatch({ control: form.control, name: 'quotaUnlimited' })
 
   useEffect(() => {
     if (!settings.data) return
     const values = settings.data.effective
     form.reset({
+      quotaUnlimited: values['ai.quota_unlimited'] ?? false,
       dailyTokenQuota: values['ai.daily_token_quota'],
       rpmPerDevice: values['ai.rpm_per_device'],
       inflightPerDevice: values['ai.inflight_per_device'],
@@ -132,7 +137,7 @@ export function SettingsPage() {
 
   const save = useMutation({
     mutationFn: (values: SettingsForm) => {
-      const payload: Record<string, number> = {}
+      const payload: Record<string, number | boolean> = { 'ai.quota_unlimited': values.quotaUnlimited }
       for (const field of fields) {
         payload[field.key] = values[field.name]
       }
@@ -148,6 +153,7 @@ export function SettingsPage() {
   const resetAll = useMutation({
     mutationFn: () => {
       const payload: Record<string, null> = {}
+      payload['ai.quota_unlimited'] = null
       for (const field of fields) payload[field.key] = null
       return api('/admin/settings', { method: 'PUT', body: { values: payload } })
     },
@@ -198,6 +204,14 @@ export function SettingsPage() {
           ) : (
             <form onSubmit={form.handleSubmit((values) => save.mutate(values))}>
               <FieldGroup className="grid gap-5 md:grid-cols-2">
+                <Field className="md:col-span-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <FieldLabel htmlFor="quota-unlimited">每日 Token 不限量</FieldLabel>
+                    <Switch id="quota-unlimited" checked={quotaUnlimited}
+                      onCheckedChange={(value) => form.setValue('quotaUnlimited', value, { shouldDirty: true })} />
+                  </div>
+                  <FieldDescription>开启后不限制每日 Token 用量；请求频率、并发和单次输出限制仍然生效。</FieldDescription>
+                </Field>
                 {fields.map((field) => {
                   const error = form.formState.errors[field.name]
                   const overridden = overrides[field.key] !== undefined
@@ -210,7 +224,10 @@ export function SettingsPage() {
                       <Input
                         id={field.key}
                         type="number"
-                        min={0}
+                        min={field.name === 'dailyTokenQuota' ? 1 : 0}
+                        readOnly={field.name === 'dailyTokenQuota' && quotaUnlimited}
+                        aria-disabled={field.name === 'dailyTokenQuota' && quotaUnlimited}
+                        className={field.name === 'dailyTokenQuota' && quotaUnlimited ? 'pointer-events-none opacity-50' : undefined}
                         aria-invalid={Boolean(error)}
                         {...form.register(field.name, { valueAsNumber: true })}
                       />

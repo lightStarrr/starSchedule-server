@@ -11,6 +11,7 @@ import (
 )
 
 type LaunchInput struct {
+	Metadata   DeviceMetadata
 	ID         uuid.UUID
 	DeviceID   uuid.UUID
 	StatDate   time.Time
@@ -22,6 +23,15 @@ type LaunchInput struct {
 	Arch       string
 	SessionID  string
 	Extra      map[string]any
+}
+
+type DeviceMetadata struct {
+	ReportedAt  *time.Time
+	AppVersion  string
+	VersionCode int
+	OSVersion   string
+	SDKInt      int
+	Arch        string
 }
 
 // InsertLaunch 在同一事务内写事件、日聚合、设备冗余计数。
@@ -60,9 +70,20 @@ func (s *Store) InsertLaunch(ctx context.Context, in LaunchInput) (bool, error) 
 		ON CONFLICT (stat_date, device_id) DO UPDATE SET
 			launch_count   = daily_active_device.launch_count + 1,
 			last_launch_at = GREATEST(daily_active_device.last_launch_at, EXCLUDED.last_launch_at),
-			app_version    = EXCLUDED.app_version`,
+			app_version    = CASE WHEN EXCLUDED.last_launch_at >= daily_active_device.last_launch_at THEN EXCLUDED.app_version ELSE daily_active_device.app_version END`,
 		dateStr(in.StatDate), in.DeviceID, in.Platform, in.AppVersion, in.OccurredAt); err != nil {
 		return false, err
+	}
+	meta := in.Metadata
+	if meta.ReportedAt != nil && (meta.AppVersion != "" || meta.VersionCode > 0 || meta.OSVersion != "" || meta.SDKInt > 0 || meta.Arch != "") {
+		if _, err := tx.Exec(ctx, `UPDATE devices SET
+			app_version=COALESCE(NULLIF($3,''),app_version), version_code=CASE WHEN $4>0 THEN $4 ELSE version_code END,
+			os_version=COALESCE(NULLIF($5,''),os_version), sdk_int=CASE WHEN $6>0 THEN $6 ELSE sdk_int END,
+			arch=COALESCE(NULLIF($7,''),arch), metadata_reported_at=$2
+			WHERE id=$1 AND (metadata_reported_at IS NULL OR metadata_reported_at<=$2)`,
+			in.DeviceID, meta.ReportedAt, meta.AppVersion, meta.VersionCode, meta.OSVersion, meta.SDKInt, meta.Arch); err != nil {
+			return false, err
+		}
 	}
 
 	if _, err = tx.Exec(ctx, `

@@ -166,15 +166,14 @@ func (c *AICatalog) ListEnabled(ctx context.Context) ([]model.CatalogEntry, erro
 	return c.store.ListEnabledCatalog(ctx)
 }
 
-// SnapshotByKey 按 alias 或上游 model_id 取指定模型的配置。
-// 仅用于后台试跑，客户端仍然只能走「当前启用」的组合。
-func (c *AICatalog) SnapshotByKey(ctx context.Context, key string) (*CatalogSnapshot, error) {
+// SnapshotByAlias 严格按对外 alias 查找启用模型，避免与上游 model_id 的命名空间冲突。
+func (c *AICatalog) SnapshotByAlias(ctx context.Context, key string) (*CatalogSnapshot, error) {
 	entries, err := c.store.ListEnabledCatalog(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for _, e := range entries {
-		if e.Alias != key && e.ModelID != key {
+		if e.Alias != key {
 			continue
 		}
 		// 统一走 snapshotForEntry，避免新增字段时漏填（之前思考能力就漏在这里）

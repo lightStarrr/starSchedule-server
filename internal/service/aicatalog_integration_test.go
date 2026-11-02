@@ -164,9 +164,9 @@ func TestAICatalogIntegration(t *testing.T) {
 		}
 		cat.Invalidate(ctx)
 
-		snap, err := cat.SnapshotByKey(ctx, first.Alias)
+		snap, err := cat.SnapshotByAlias(ctx, first.Alias)
 		if err != nil {
-			t.Fatalf("SnapshotByKey 失败: %v", err)
+			t.Fatalf("SnapshotByAlias 失败: %v", err)
 		}
 		if snap.ModelUUID != first.ID {
 			t.Fatalf("别名解析到了错误的模型: %s", snap.ModelID)
@@ -174,6 +174,24 @@ func TestAICatalogIntegration(t *testing.T) {
 		if snap.ReasoningMode != "effort" || snap.ReasoningDefault != "medium" || len(snap.ReasoningEfforts) != 3 {
 			t.Fatalf("思考能力没有带出来: mode=%q default=%q efforts=%v",
 				snap.ReasoningMode, snap.ReasoningDefault, snap.ReasoningEfforts)
+		}
+	})
+
+	t.Run("alias 与其他模型的上游名称冲突时仍精确定位", func(t *testing.T) {
+		alias := "000-" + suffix
+		if _, err := st.UpdateModel(ctx, first.ID, postgres.ModelPatch{Alias: &alias}); err != nil {
+			t.Fatal(err)
+		}
+		first.Alias = alias
+		if _, err := st.CreateModel(ctx, postgres.ModelInput{ProviderID: provider.ID, ModelID: alias, Alias: "other-" + suffix, Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+		snap, err := cat.SnapshotByAlias(ctx, alias)
+		if err != nil || snap.ModelUUID != first.ID {
+			t.Fatalf("alias 不应匹配到另一模型的 model_id: %+v %v", snap, err)
+		}
+		if _, err := cat.SnapshotByAlias(ctx, first.ModelID); !errors.Is(err, service.ErrModelNotFound) {
+			t.Fatalf("不能接受上游 model_id: %v", err)
 		}
 	})
 
@@ -187,7 +205,7 @@ func TestAICatalogIntegration(t *testing.T) {
 		if _, err := cat.Snapshot(ctx); !errors.Is(err, service.ErrAINotConfigured) {
 			t.Fatalf("期望 ErrAINotConfigured，实际 %v", err)
 		}
-		if _, err := cat.SnapshotByKey(ctx, first.Alias); !errors.Is(err, service.ErrModelNotFound) {
+		if _, err := cat.SnapshotByAlias(ctx, first.Alias); !errors.Is(err, service.ErrModelNotFound) {
 			t.Fatalf("停用供应商的模型应不可解析，实际 %v", err)
 		}
 		// 管理端列表按供应商启用状态过滤

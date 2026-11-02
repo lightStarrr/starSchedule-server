@@ -52,9 +52,9 @@ func (c *Client) Del(ctx context.Context, keys ...string) error {
 
 // Cache keys（集中定义，避免拼写漂移）。
 const (
-	KeyAIActive  = "cache:ai:active"
-	KeyAICatalog = "cache:ai:catalog"
-	KeySettings  = "cache:settings"
+	KeyAIActive  = "cache:ai:active:v2"
+	KeyAICatalog = "cache:ai:catalog:v2"
+	KeySettings  = "cache:settings:v2"
 )
 
 func BanKey(deviceID string) string { return "ban:device:" + deviceID }

@@ -105,7 +105,7 @@
   "last_seen_at": "2026-10-31T07:40:12Z",
   "launch_count": 42,
   "suspect_reinstall": false,
-  "ai": { "used_tokens": 1500, "daily_quota": 200000, "reset_at": "2026-11-01T00:00:00+08:00" },
+  "ai": { "used_tokens": 1500, "daily_quota": 200000, "quota_unlimited": false, "reset_at": "2026-11-01T00:00:00+08:00" },
   "limits": { "rpm": 20, "inflight": 2 },
   "server_time": "2026-10-31T07:43:19Z"
 }
@@ -186,7 +186,8 @@
     "inflight": 2,
     "max_output_tokens": 4096,
     "max_input_bytes": 131072,
-    "daily_token_quota": 200000
+    "daily_token_quota": 200000,
+    "quota_unlimited": false
   },
   "usage": {
     "used_tokens": 1500,
@@ -199,6 +200,8 @@
 ```
 
 `model` 是默认模型（客户端不传 `model` 时使用），`limits.max_input_bytes` 是 messages 总量上限。
+
+`limits.quota_unlimited` 为 true 时不限制每日 Token，`usage.remaining_tokens` 为 null；为 false 时按正整数 `daily_token_quota` 限制，剩余额度为非负整数。Android 需根据布尔值显示“不限量”。详细迁移和后台设置语义见 [模型与额度变更](model-and-quota-changes.md)。
 
 ## 8. POST /ai/chat/completions
 
@@ -293,6 +296,7 @@ data: {"error":{"code":"UPSTREAM_TIMEOUT","message":"模型响应超时，请重
 {
   "date": "2026-10-31",
   "daily_quota": 200000,
+  "quota_unlimited": false,
   "used_tokens": 1500,
   "remaining_tokens": 198500,
   "request_count": 3,

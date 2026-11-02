@@ -151,7 +151,7 @@ func (r *ChatRequest) BuildUpstream(model string, maxOutput int, stream bool, ef
 }
 
 // BuildReasoningProbe 构造一条最小请求，用于探测上游是否接受 reasoning_effort：
-// 200 说明接受，400 说明不支持，其余错误无法判断。
+// 每个档位独立确认；200 表示上游接受参数，4xx 需结合基线请求判断。
 func BuildReasoningProbe(model, effort string) upstreamRequest {
 	return upstreamRequest{
 		Model:           model,

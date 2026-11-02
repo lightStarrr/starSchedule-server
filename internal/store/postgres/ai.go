@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -138,13 +139,21 @@ type FetchedModel struct {
 
 // UpsertFetchedModels 同步上游模型列表：新增插入，已存在的只更新元信息，不覆盖后台的启用状态与别名。
 func (s *Store) UpsertFetchedModels(ctx context.Context, providerID uuid.UUID, items []FetchedModel) (int, error) {
-	batch := &pgx.Batch{}
+	tx, err := s.beginModelWrite(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 	for _, it := range items {
 		display := it.DisplayName
 		if display == "" {
 			display = it.ModelID
 		}
-		batch.Queue(`
+		alias, err := modelAlias(ctx, tx, it.ModelID, it.ModelID)
+		if err != nil {
+			return 0, err
+		}
+		_, err = tx.Exec(ctx, `
 			INSERT INTO ai_provider_models (id, provider_id, model_id, alias, display_name, context_window, source, enabled)
 			VALUES ($1, $2, $3, $4, $5, $6, 'fetched',
 			        NOT EXISTS (SELECT 1 FROM ai_provider_models x WHERE x.model_id = $3 AND x.enabled))
@@ -153,21 +162,15 @@ func (s *Store) UpsertFetchedModels(ctx context.Context, providerID uuid.UUID, i
 				context_window = CASE WHEN EXCLUDED.context_window > 0
 					THEN EXCLUDED.context_window ELSE ai_provider_models.context_window END,
 				fetched_at = now()`,
-			uuid.Must(uuid.NewV7()), providerID, it.ModelID, it.ModelID, display, it.ContextWindow)
-	}
-	br := s.pool.SendBatch(ctx, batch)
-	defer br.Close()
-	n := 0
-	for range items {
-		if _, err := br.Exec(); err != nil {
-			if isUniqueViolation(err) {
-				continue // 别名冲突：保留已有别名，跳过该条
-			}
-			return n, err
+			uuid.Must(uuid.NewV7()), providerID, it.ModelID, alias, display, it.ContextWindow)
+		if err != nil {
+			return 0, modelWriteError(err)
 		}
-		n++
 	}
-	return n, nil
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return len(items), nil
 }
 
 func (s *Store) ListModels(ctx context.Context, providerID uuid.UUID) ([]model.ProviderModel, error) {
@@ -203,15 +206,20 @@ type ModelInput struct {
 }
 
 func (s *Store) CreateModel(ctx context.Context, in ModelInput) (*model.ProviderModel, error) {
-	alias := in.Alias
-	if alias == "" {
-		alias = in.ModelID
+	tx, err := s.beginModelWrite(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	alias, err := modelAlias(ctx, tx, in.ModelID, in.Alias)
+	if err != nil {
+		return nil, err
 	}
 	display := in.DisplayName
 	if display == "" {
 		display = in.ModelID
 	}
-	m, err := scanModel(s.pool.QueryRow(ctx, `
+	m, err := scanModel(tx.QueryRow(ctx, `
 		INSERT INTO ai_provider_models (id, provider_id, model_id, alias, display_name, context_window, source, enabled)
 		VALUES ($1, $2, $3, $4, $5, $6, 'manual',
 		        $7 AND NOT EXISTS (SELECT 1 FROM ai_provider_models x WHERE x.model_id = $3 AND x.enabled))
@@ -220,7 +228,13 @@ func (s *Store) CreateModel(ctx context.Context, in ModelInput) (*model.Provider
 	if err != nil && isUniqueViolation(err) {
 		return nil, store.ErrConflict
 	}
-	return m, err
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 type ModelPatch struct {
@@ -234,12 +248,30 @@ type ModelPatch struct {
 }
 
 func (s *Store) UpdateModel(ctx context.Context, id uuid.UUID, p ModelPatch) (*model.ProviderModel, error) {
-	cur, err := s.GetModel(ctx, id)
+	tx, err := s.beginModelWrite(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	cur, err := scanModel(tx.QueryRow(ctx, `SELECT `+modelColumns+` FROM ai_provider_models WHERE id=$1 FOR UPDATE`, id))
 	if err != nil {
 		return nil, err
 	}
 	if p.Alias != nil {
-		cur.Alias = *p.Alias
+		cur.Alias = strings.TrimSpace(*p.Alias)
+		if cur.Alias == "" {
+			return nil, store.ErrConflict
+		}
+		var conflict bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ai_provider_models WHERE alias=$1 AND model_id<>$2)`, cur.Alias, cur.ModelID).Scan(&conflict); err != nil {
+			return nil, err
+		}
+		if conflict {
+			return nil, store.ErrConflict
+		}
+		if _, err := tx.Exec(ctx, `UPDATE ai_provider_models SET alias=$1 WHERE model_id=$2`, cur.Alias, cur.ModelID); err != nil {
+			return nil, modelWriteError(err)
+		}
 	}
 	if p.DisplayName != nil {
 		cur.DisplayName = *p.DisplayName
@@ -260,7 +292,7 @@ func (s *Store) UpdateModel(ctx context.Context, id uuid.UUID, p ModelPatch) (*m
 	if p.ReasoningDefault != nil {
 		cur.ReasoningDefault = *p.ReasoningDefault
 	}
-	m, err := scanModel(s.pool.QueryRow(ctx, `
+	m, err := scanModel(tx.QueryRow(ctx, `
 		UPDATE ai_provider_models SET alias = $2, display_name = $3, context_window = $4, enabled = $5,
 			reasoning_mode = $6, reasoning_efforts = $7, reasoning_default = $8
 		WHERE id = $1 RETURNING `+modelColumns,
@@ -269,7 +301,13 @@ func (s *Store) UpdateModel(ctx context.Context, id uuid.UUID, p ModelPatch) (*m
 	if err != nil && isUniqueViolation(err) {
 		return nil, store.ErrConflict
 	}
-	return m, err
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func (s *Store) DeleteModel(ctx context.Context, id uuid.UUID) error {
@@ -389,10 +427,24 @@ func (s *Store) GetActive(ctx context.Context) (*model.ActiveAIConfig, error) {
 }
 
 func (s *Store) SetActive(ctx context.Context, providerID, modelID uuid.UUID) error {
-	return s.SetSettings(ctx, map[string]any{
-		keyActiveProvider: providerID.String(),
-		keyActiveModel:    modelID.String(),
-	})
+	tx, err := s.beginModelWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	var valid bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ai_provider_models m JOIN ai_providers p ON p.id=m.provider_id WHERE m.id=$1 AND p.id=$2 AND m.enabled AND p.enabled)`, modelID, providerID).Scan(&valid); err != nil {
+		return err
+	}
+	if !valid {
+		return store.ErrConflict
+	}
+	for _, setting := range []struct{ key, value string }{{keyActiveModel, modelID.String()}, {keyActiveProvider, providerID.String()}} {
+		if _, err := tx.Exec(ctx, `INSERT INTO app_settings (key,value) VALUES ($1,to_jsonb($2::text)) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`, setting.key, setting.value); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 // IncrUsage 累加设备当日用量；estimated 与 isError 分别计数。

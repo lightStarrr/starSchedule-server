@@ -95,6 +95,17 @@ interface ModelGroup {
   enabled: boolean
 }
 
+function ModelReasoning({ model }: { model: ModelInfo }) {
+  if (model.reasoning_mode === 'effort') {
+    return <div className="flex flex-wrap items-center gap-1">
+      <Badge variant="secondary">可设置</Badge>
+      {(model.reasoning_efforts ?? []).map((effort) => <Badge key={effort} variant="outline">{effort}</Badge>)}
+      {!model.reasoning_efforts?.length ? <span className="text-xs text-muted-foreground">暂无档位信息，请重新检测</span> : null}
+    </div>
+  }
+  return <Badge variant="outline">{model.reasoning_mode === 'fixed' ? '固定开启' : model.reasoning_mode === 'none' ? '不支持' : '未检测'}</Badge>
+}
+
 export function ModelsPage() {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -431,7 +442,7 @@ export function ModelsPage() {
       <Card className="overflow-hidden py-0">
         <CardHeader className="px-4 pt-4">
           <CardTitle>模型清单</CardTitle>
-          <CardDescription>同一模型出现在多家供应商时合并展示，开关与供应商切换即时生效</CardDescription>
+          <CardDescription>同一模型出现在多家供应商时合并展示，开关与供应商切换即时生效。检测思考档位最多发送 5 次小请求，可能产生上游费用。</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           {models.isLoading ? (
@@ -439,6 +450,11 @@ export function ModelsPage() {
               {Array.from({ length: 5 }).map((_, index) => (
                 <Skeleton key={index} className="h-10 w-full" />
               ))}
+            </div>
+          ) : models.isError ? (
+            <div role="alert" className="flex flex-wrap items-center gap-3 p-4 text-sm">
+              <p>模型加载失败：{errorMessage(models.error)}</p>
+              <Button size="sm" variant="outline" onClick={() => void models.refetch()}>重试</Button>
             </div>
           ) : groups.length === 0 ? (
             <Empty className="border-0">
@@ -458,7 +474,31 @@ export function ModelsPage() {
               </EmptyDescription>
             </Empty>
           ) : (
-            <Table>
+            <>
+            <div className="divide-y md:hidden">
+              {groups.map((group) => <div key={group.modelId} className="flex min-w-0 flex-col gap-3 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 break-all">
+                    <p className="font-medium">{group.active.display_name || group.modelId} {group.active.id === defaultModelId ? <Badge>默认</Badge> : null}</p>
+                    <p className="font-mono text-xs text-muted-foreground">{group.active.alias}</p>
+                  </div>
+                  <Switch checked={group.enabled} disabled={setAvailability.isPending} aria-label={`启用 ${group.modelId}`}
+                    onCheckedChange={(enabled) => setAvailability.mutate({ modelId: group.modelId, enabled })} />
+                </div>
+                <ModelReasoning model={group.active} />
+                <Select value={group.active.provider_id} disabled={setAvailability.isPending}
+                  onValueChange={(value) => value && setAvailability.mutate({ modelId: group.modelId, enabled: true, providerId: value })}
+                  items={group.rows.map((row) => ({ value: row.provider_id, label: row.provider_name }))}>
+                  <SelectTrigger className="w-full" aria-label={`供应商 ${group.modelId}`}><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectGroup>{group.rows.map((row) => <SelectItem key={row.id} value={row.provider_id}>{row.provider_name}</SelectItem>)}</SelectGroup></SelectContent>
+                </Select>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" disabled={detectReasoning.isPending} onClick={() => detectReasoning.mutate(group.active.id)}>检测思考能力</Button>
+                  <Button variant="ghost" size="sm" onClick={() => setPendingDelete(group)}>删除</Button>
+                </div>
+              </div>)}
+            </div>
+            <div className="hidden md:block"><Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>模型</TableHead>
@@ -497,6 +537,7 @@ export function ModelsPage() {
                       {group.rows.length > 1 ? (
                         <Select
                           value={group.active.provider_id}
+                          disabled={setAvailability.isPending}
                           onValueChange={(value) =>
                             setAvailability.mutate({
                               modelId: group.modelId,
@@ -529,21 +570,7 @@ export function ModelsPage() {
                       )}
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
-                      <div className="flex flex-col gap-0.5">
-                        {group.active.reasoning_mode === 'effort' ? (
-                          <Badge variant="secondary">可设置</Badge>
-                        ) : group.active.reasoning_mode === 'fixed' ? (
-                          <Badge variant="secondary">固定开启</Badge>
-                        ) : group.active.reasoning_mode === 'unknown' ? (
-                          <Badge variant="outline" className="text-muted-foreground">
-                            未检测
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-muted-foreground">
-                            不支持
-                          </Badge>
-                        )}
-                      </div>
+                      <ModelReasoning model={group.active} />
                     </TableCell>
                     <TableCell className="hidden lg:table-cell text-right tabular-nums">
                       {group.active.context_window ? formatNumber(group.active.context_window) : '—'}
@@ -596,7 +623,8 @@ export function ModelsPage() {
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
+            </Table></div>
+            </>
           )}
         </CardContent>
       </Card>

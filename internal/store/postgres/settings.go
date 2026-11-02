@@ -98,6 +98,7 @@ func rawToInt(raw json.RawMessage) (int64, bool) {
 
 // RuntimeSettings 是解析后的运行时参数。
 type RuntimeSettings struct {
+	QuotaUnlimited      bool
 	DailyTokenQuota     int64
 	RPMPerDevice        int
 	InflightPerDevice   int
@@ -108,6 +109,15 @@ type RuntimeSettings struct {
 	AILogRetentionDays  int
 	// ReasoningEffort 是所有支持思考强度的模型共用的默认档位，空串表示不指定。
 	ReasoningEffort string
+}
+
+// RemainingTokens 的 nil 表示没有日额度上限，JSON 编码为 null。
+func (s RuntimeSettings) RemainingTokens(used int64) *int64 {
+	if s.QuotaUnlimited {
+		return nil
+	}
+	remaining := max(int64(0), s.DailyTokenQuota-used)
+	return &remaining
 }
 
 func (s *Store) GetRuntimeSettings(ctx context.Context, defaults RuntimeSettings) (RuntimeSettings, error) {
@@ -122,6 +132,12 @@ func (s *Store) GetRuntimeSettings(ctx context.Context, defaults RuntimeSettings
 		}
 	}
 	setInt("ai.daily_token_quota", &out.DailyTokenQuota)
+	if out.DailyTokenQuota <= 0 {
+		out.DailyTokenQuota = 200000
+	}
+	if v, ok := raw["ai.quota_unlimited"]; ok {
+		_ = json.Unmarshal(v, &out.QuotaUnlimited)
+	}
 	toI := func(n int64) int { return int(n) }
 
 	if v, ok := rawToInt(raw["ai.max_output_tokens"]); ok && v >= 0 {

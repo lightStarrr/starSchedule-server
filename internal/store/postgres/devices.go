@@ -74,10 +74,10 @@ func (s *Store) UpsertDevice(ctx context.Context, in RegisterDeviceInput) (*mode
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO devices (id, install_id, android_id_hash, platform, app_version, version_code,
 			os_version, sdk_int, arch, status, first_seen_at, last_seen_at, first_ip, last_ip,
-			suspect_reinstall, extra)
+			suspect_reinstall, extra, metadata_reported_at)
 		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', $10, $10, $11, $11,
 		       EXISTS (SELECT 1 FROM devices d2 WHERE d2.android_id_hash = $3 AND d2.install_id <> $2),
-		       $12::jsonb
+		       $12::jsonb, $10
 		ON CONFLICT (install_id) DO UPDATE SET
 			android_id_hash = EXCLUDED.android_id_hash,
 			platform        = EXCLUDED.platform,
@@ -86,6 +86,7 @@ func (s *Store) UpsertDevice(ctx context.Context, in RegisterDeviceInput) (*mode
 			os_version      = EXCLUDED.os_version,
 			sdk_int         = EXCLUDED.sdk_int,
 			arch            = EXCLUDED.arch,
+			metadata_reported_at = EXCLUDED.last_seen_at,
 			last_seen_at    = GREATEST(devices.last_seen_at, EXCLUDED.last_seen_at),
 			last_ip         = EXCLUDED.last_ip,
 			extra           = EXCLUDED.extra,

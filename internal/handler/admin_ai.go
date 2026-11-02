@@ -2,10 +2,11 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -330,28 +331,70 @@ func (d *Deps) AdminListModels(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
-// detectReasoning 探测模型是否接受 reasoning_effort。
-// 200 视为支持；400 视为不支持；网络/超时等无法判断时返回 unknown，下次再试。
+// detectReasoning 逐档确认上游接受的参数；不把某一档成功推广到其他档。
+// 200 只能证明网关接受请求，不能证明供应商内部没有忽略该参数。
 func (d *Deps) detectReasoning(ctx context.Context, m *model.ProviderModel, baseURL, apiKey string) (string, []string) {
-	key := strings.ToLower(m.ModelID)
-	if strings.Contains(key, "reasoner") || strings.Contains(key, "thinking") || strings.HasPrefix(key, "qwq") {
-		// 这类模型固定带思考，没有强度参数
+	probeCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	accepted := []string{}
+	for _, effort := range aiproxy.ReasoningEfforts {
+		attemptCtx, done := context.WithTimeout(probeCtx, 12*time.Second)
+		resp, err := d.AI.OpenChat(attemptCtx, baseURL, apiKey, aiproxy.BuildReasoningProbe(m.ModelID, effort))
+		if err == nil {
+			var body struct {
+				Choices json.RawMessage `json:"choices"`
+			}
+			decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&body)
+			_ = resp.Body.Close()
+			done()
+			if decodeErr != nil || len(body.Choices) == 0 || body.Choices[0] != '[' {
+				return "unknown", nil
+			}
+			accepted = append(accepted, effort)
+			continue
+		}
+		done()
+		var up *aiproxy.UpstreamError
+		if errors.As(err, &up) && (up.StatusCode == http.StatusBadRequest || up.StatusCode == http.StatusUnprocessableEntity) {
+			continue
+		}
+		d.Logger.Warn("探测思考强度失败", "model", m.ModelID, "effort", effort, "error", err)
+		return "unknown", nil
+	}
+	if len(accepted) > 0 {
+		return "effort", accepted
+	}
+	// 全部档位被拒绝时确认不带参数的基线可用，排除模型不可用或请求格式问题。
+	resp, err := d.AI.OpenChat(probeCtx, baseURL, apiKey, aiproxy.BuildReasoningProbe(m.ModelID, ""))
+	if err != nil {
+		return "unknown", nil
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Choices []struct {
+			Message struct {
+				ReasoningContent string `json:"reasoning_content"`
+				Reasoning        string `json:"reasoning"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			Details struct {
+				Tokens int `json:"reasoning_tokens"`
+			} `json:"completion_tokens_details"`
+		} `json:"usage"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&body); err != nil || body.Choices == nil {
+		return "unknown", nil
+	}
+	for _, choice := range body.Choices {
+		if choice.Message.ReasoningContent != "" || choice.Message.Reasoning != "" {
+			return "fixed", nil
+		}
+	}
+	if body.Usage.Details.Tokens > 0 {
 		return "fixed", nil
 	}
-
-	probeCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-	defer cancel()
-	resp, err := d.AI.OpenChat(probeCtx, baseURL, apiKey, aiproxy.BuildReasoningProbe(m.ModelID, "low"))
-	if err == nil {
-		_ = resp.Body.Close()
-		return "effort", aiproxy.ReasoningEfforts
-	}
-	var up *aiproxy.UpstreamError
-	if errors.As(err, &up) && up.StatusCode == http.StatusBadRequest {
-		return "none", nil
-	}
-	d.Logger.Warn("探测思考强度失败", "model", m.ModelID, "error", err)
-	return "unknown", nil
+	return "none", nil
 }
 
 // detectAndStore 探测并写回模型，未探测出结果时保持原状。
@@ -435,68 +478,34 @@ func (d *Deps) AdminSetModelAvailability(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 
-	rows, err := d.Store.ListModelsByModelID(ctx, req.ModelID)
+	var selectedProvider *uuid.UUID
+	if req.ProviderID != nil {
+		id, err := uuid.Parse(*req.ProviderID)
+		if err != nil {
+			respond.InvalidArgument(c, "供应商 ID 无效")
+			return
+		}
+		selectedProvider = &id
+	}
+	selected, err := d.Store.SetModelAvailability(ctx, req.ModelID, req.Enabled, selectedProvider)
 	if err != nil {
-		respond.Internal(c, "查询模型失败")
-		return
-	}
-	if len(rows) == 0 {
-		respond.NotFound(c, "模型不存在")
-		return
-	}
-
-	var target uuid.UUID
-	if req.Enabled {
-		switch {
-		case req.ProviderID != nil:
-			for _, r := range rows {
-				if r.ProviderID.String() == *req.ProviderID {
-					target = r.ProviderID
-					break
-				}
-			}
-			if target == uuid.Nil {
-				respond.InvalidArgument(c, "该供应商下没有这个模型")
-				return
-			}
-		default:
-			for _, r := range rows {
-				if r.Enabled {
-					target = r.ProviderID
-					break
-				}
-			}
-			if target == uuid.Nil {
-				target = rows[0].ProviderID
-			}
-		}
-		p, err := d.Store.GetProvider(ctx, target)
-		if err != nil || !p.Enabled {
-			respond.InvalidArgument(c, "该供应商已停用，请先启用供应商")
+		if errors.Is(err, store.ErrNotFound) {
+			respond.NotFound(c, "模型或供应商不存在")
 			return
 		}
-	}
-
-	for _, r := range rows {
-		want := req.Enabled && r.ProviderID == target
-		if r.Enabled == want {
-			continue
-		}
-		enabled := want
-		if _, err := d.Store.UpdateModel(ctx, r.ID, postgres.ModelPatch{Enabled: &enabled}); err != nil {
-			respond.Internal(c, "更新模型失败")
+		if errors.Is(err, store.ErrConflict) {
+			respond.Error(c, http.StatusConflict, respond.CodeInvalidArgument, "供应商已停用或别名冲突", nil)
 			return
 		}
+		respond.Internal(c, "切换模型供应商失败")
+		return
 	}
 	d.Catalog.Invalidate(ctx)
-
-	// 首次启用时自动探测该模型是否支持设置思考强度（每个模型只探一次）
-	if req.Enabled && target != uuid.Nil {
-		for _, r := range rows {
-			if r.ProviderID == target && r.ReasoningMode == "unknown" {
-				d.detectAndStore(ctx, &r)
-				break
-			}
+	target := uuid.Nil
+	if req.Enabled {
+		target = selected.ProviderID
+		if selected.ReasoningMode == "unknown" {
+			d.detectAndStore(ctx, selected)
 		}
 	}
 

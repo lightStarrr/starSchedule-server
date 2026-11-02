@@ -12,6 +12,7 @@ import (
 
 // 允许后台热改的参数键；其余键一律拒绝，避免任意写。
 var settingKeys = map[string]string{
+	"ai.quota_unlimited":          "bool",
 	"ai.daily_token_quota":        "int",
 	"ai.rpm_per_device":           "int",
 	"ai.inflight_per_device":      "int",
@@ -44,6 +45,7 @@ func (d *Deps) AdminGetSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"overrides": overrides,
 		"effective": gin.H{
+			"ai.quota_unlimited":          effective.QuotaUnlimited,
 			"ai.daily_token_quota":        effective.DailyTokenQuota,
 			"ai.rpm_per_device":           effective.RPMPerDevice,
 			"ai.inflight_per_device":      effective.InflightPerDevice,
@@ -55,6 +57,7 @@ func (d *Deps) AdminGetSettings(c *gin.Context) {
 			"ai.reasoning_effort":         effective.ReasoningEffort,
 		},
 		"defaults": gin.H{
+			"ai.quota_unlimited":          def.QuotaUnlimited,
 			"ai.daily_token_quota":        def.DailyTokenQuota,
 			"ai.rpm_per_device":           def.RPMPerDevice,
 			"ai.inflight_per_device":      def.InflightPerDevice,
@@ -104,9 +107,22 @@ func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 			updates[k] = str
 			continue
 		}
+		if settingKeys[k] == "bool" {
+			value, ok := v.(bool)
+			if !ok {
+				respond.InvalidArgument(c, "配置项 "+k+" 必须是布尔值")
+				return
+			}
+			updates[k] = value
+			continue
+		}
 		num, ok := toPositiveInt(v)
 		if !ok {
 			respond.InvalidArgument(c, "配置项 "+k+" 必须是非负整数")
+			return
+		}
+		if k == "ai.daily_token_quota" && num == 0 {
+			respond.InvalidArgument(c, "每日 Token 额度必须大于 0，不限量请使用独立开关")
 			return
 		}
 		updates[k] = num

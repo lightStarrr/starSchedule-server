@@ -25,7 +25,7 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { PageHeader } from '@/components/page-header'
-import { api } from '@/lib/api'
+import { api, errorMessage } from '@/lib/api'
 import { formatNumber } from '@/lib/format'
 import { streamPlayground, type ChatMessage } from '@/lib/stream'
 import type { CatalogResponse } from '@/lib/types'
@@ -88,7 +88,7 @@ export function PlaygroundPage() {
 
   const send = async () => {
     const content = input.trim()
-    if (!content || streaming) return
+    if (!content || streaming || !selected || catalog.isError) return
 
     const nextMessages: ChatMessage[] = [...messages, { role: 'user', content }]
     setMessages(nextMessages)
@@ -107,7 +107,7 @@ export function PlaygroundPage() {
 
     try {
       await streamPlayground(
-        { messages: nextMessages, model: modelKey, reasoning_effort: effort || undefined },
+        { messages: nextMessages, model: modelKey, reasoning_effort: reasoningMode === 'effort' && selected?.reasoning_efforts?.includes(effort) ? effort : undefined },
         {
           onDelta: (delta) => {
             text += delta
@@ -153,7 +153,7 @@ export function PlaygroundPage() {
         description="选定模型直接打对应供应商，用来验证密钥、模型与流式链路。不占用设备配额。"
       />
 
-      {items.length === 0 && !catalog.isLoading ? (
+      {catalog.isError ? <Alert variant="destructive"><AlertTitle>模型加载失败</AlertTitle><AlertDescription>{errorMessage(catalog.error)}<Button size="sm" variant="outline" onClick={() => void catalog.refetch()}>重试</Button></AlertDescription></Alert> : items.length === 0 && !catalog.isLoading ? (
         <Alert>
           <WandSparklesIcon />
           <AlertTitle>还没有可用的模型</AlertTitle>
@@ -221,7 +221,7 @@ export function PlaygroundPage() {
                 }}
               />
               <div className="flex items-center gap-2">
-                <Button size="sm" onClick={() => void send()} disabled={streaming || !input.trim()}>
+                <Button size="sm" onClick={() => void send()} disabled={streaming || !input.trim() || !selected || catalog.isError}>
                   <SendIcon data-icon="inline-start" />
                   发送
                 </Button>
@@ -251,8 +251,8 @@ export function PlaygroundPage() {
           </CardContent>
         </Card>
 
-        <div className="flex flex-col gap-4">
-          <Card size="sm">
+        <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-4">
+          <Card size="sm" className="order-last lg:order-first">
             <CardHeader>
               <CardTitle>本次指标</CardTitle>
             </CardHeader>
@@ -286,7 +286,7 @@ export function PlaygroundPage() {
             </CardContent>
           </Card>
 
-          <Card size="sm">
+          <Card size="sm" className="order-first lg:order-last">
             <CardHeader>
               <CardTitle>参数</CardTitle>
               <CardDescription>仅影响本次试跑</CardDescription>
@@ -297,7 +297,8 @@ export function PlaygroundPage() {
                   <FieldLabel>模型</FieldLabel>
                   <Select
                     value={modelKey}
-                    onValueChange={(value) => setModelKey(value ?? '')}
+                    onValueChange={(value) => { setModelKey(value ?? ''); setEffort('') }}
+                    disabled={streaming}
                     items={items.map((item) => ({
                       value: item.alias,
                       label: `${item.display_name}（${item.provider_name}）`,
@@ -327,6 +328,7 @@ export function PlaygroundPage() {
                   {reasoningMode === 'effort' ? (
                     <Select
                       value={effort || '__default__'}
+                      disabled={streaming}
                       onValueChange={(value) => setEffort(value === '__default__' ? '' : (value ?? ''))}
                       items={[
                         { value: '__default__', label: `默认（${globalEffort || '不指定'}）` },

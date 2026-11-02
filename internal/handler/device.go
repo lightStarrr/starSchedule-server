@@ -90,9 +90,10 @@ func (d *Deps) Me(c *gin.Context) {
 		"launch_count":      dev.LaunchCount,
 		"suspect_reinstall": dev.SuspectReinstall,
 		"ai": gin.H{
-			"used_tokens": usage.PromptTokens + usage.CompletionTokens,
-			"daily_quota": settings.DailyTokenQuota,
-			"reset_at":    d.resetAt().Format(time.RFC3339),
+			"quota_unlimited": settings.QuotaUnlimited,
+			"used_tokens":     usage.PromptTokens + usage.CompletionTokens,
+			"daily_quota":     settings.DailyTokenQuota,
+			"reset_at":        d.resetAt().Format(time.RFC3339),
 		},
 		"limits": gin.H{
 			"rpm":      settings.RPMPerDevice,

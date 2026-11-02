@@ -165,6 +165,7 @@ export interface UsageByDevice {
 }
 
 export type SettingKey =
+	| 'ai.quota_unlimited'
   | 'ai.daily_token_quota'
   | 'ai.rpm_per_device'
   | 'ai.inflight_per_device'
@@ -175,13 +176,13 @@ export type SettingKey =
   | 'retention.launch_event_days'
   | 'retention.ai_log_days'
 
-// 与后端 handler.settingKeys 对齐：只有 ai.reasoning_effort 是字符串枚举，其余都是 int。
+// 与后端配置对齐：思考强度为字符串，不限量为布尔值，其余为数值。
 export type StringSettingKey = 'ai.reasoning_effort'
-export type NumericSettingKey = Exclude<SettingKey, StringSettingKey>
+export type NumericSettingKey = Exclude<SettingKey, StringSettingKey | 'ai.quota_unlimited'>
 
 // 逐键推导值类型。写成 Record<SettingKey, number | string> 会把所有值都拓宽成联合类型，
 // 导致读 ai.daily_token_quota 这类纯数值键时也拿不到 number。
-export type SettingValue<K extends SettingKey> = K extends StringSettingKey ? string : number
+export type SettingValue<K extends SettingKey> = K extends StringSettingKey ? string : K extends 'ai.quota_unlimited' ? boolean : number
 export type SettingMap = { [K in SettingKey]: SettingValue<K> }
 
 export interface SettingsPayload {

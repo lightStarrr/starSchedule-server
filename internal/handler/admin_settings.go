@@ -88,10 +88,7 @@ func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 			return
 		}
 		if v == nil {
-			if err := d.Store.DeleteSetting(ctx, k); err != nil {
-				respond.Internal(c, "恢复默认值失败")
-				return
-			}
+			updates[k] = nil
 			continue
 		}
 		if settingKeys[k] == "string" {
@@ -114,13 +111,10 @@ func (d *Deps) AdminUpdateSettings(c *gin.Context) {
 		}
 		updates[k] = num
 	}
-	if len(updates) > 0 {
-		if err := d.Settings.Update(ctx, updates); err != nil {
-			respond.Internal(c, "保存失败")
-			return
-		}
+	if err := d.Settings.Update(ctx, updates); err != nil {
+		respond.Internal(c, "保存失败")
+		return
 	}
-	d.Settings.Invalidate(ctx)
 
 	d.Admin.Audit(ctx, adminFromAny(c), "settings.update", "settings", "", req.Values, c.ClientIP())
 	d.AdminGetSettings(c)

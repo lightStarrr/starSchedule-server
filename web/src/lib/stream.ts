@@ -108,32 +108,44 @@ export async function streamPlayground(
     }
   }
 
-  while (!finished) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
+  try {
+    while (!finished) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
 
-    let index = buffer.indexOf('\n')
-    while (index >= 0) {
-      const rawLine = buffer.slice(0, index)
-      buffer = buffer.slice(index + 1)
-      const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+      let index = buffer.indexOf('\n')
+      while (index >= 0) {
+        const rawLine = buffer.slice(0, index)
+        buffer = buffer.slice(index + 1)
+        const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
 
-      if (line === '') {
-        dispatch()
-        event = 'message'
-      } else if (line.startsWith(':')) {
-        // 注释帧（心跳）
-      } else if (line.startsWith('event:')) {
-        event = line.slice(6).trim()
-      } else if (line.startsWith('data:')) {
-        dataLines.push(line.slice(5).replace(/^ /, ''))
+        if (line === '') {
+          dispatch()
+          event = 'message'
+        } else if (line.startsWith(':')) {
+          // 注释帧（心跳）
+        } else if (line.startsWith('event:')) {
+          event = line.slice(6).trim()
+        } else if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).replace(/^ /, ''))
+        }
+
+        if (finished) break
+        index = buffer.indexOf('\n')
       }
-
-      if (finished) break
-      index = buffer.indexOf('\n')
     }
-  }
 
-  if (!finished) handlers.onDone?.()
+    if (!finished) {
+      handlers.onError?.({ code: 'UPSTREAM_ERROR', message: '模型连接已中断，回答未完整生成，请重试' })
+    }
+  } finally {
+    // 收到终止事件后主动释放响应流，包括服务端还未关闭连接的情况。
+    try {
+      await reader.cancel()
+    } catch {
+      /* 网络断开或用户取消时，响应流可能已经关闭。 */
+    }
+    reader.releaseLock()
+  }
 }

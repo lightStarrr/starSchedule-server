@@ -74,7 +74,7 @@ services:
   # 保留这一步是为了让「迁移失败」在 api 起来之前就暴露出来。
   migrate:
     image: ${APP_IMAGE:?set APP_IMAGE in .env, e.g. ghcr.io/your-name/starschedule-server:latest}
-    command: ["/app/api", "-migrate-only"]
+    command: ["-migrate-only"]
     environment: *app-env
     depends_on:
       postgres:

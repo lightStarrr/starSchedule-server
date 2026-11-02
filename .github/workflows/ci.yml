@@ -102,11 +102,11 @@ jobs:
           cache: true
       - name: 迁移
         run: go run ./cmd/api -migrate-only
-      - name: 集成测试（模型目录与默认模型）
+      - name: 集成测试（模型目录、用量结算与配置事务）
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/starschedule?sslmode=disable
           TEST_REDIS_ADDR: localhost:6379
-        run: go test ./internal/service/... -run TestAICatalogIntegration -v
+        run: go test -p 1 ./internal/service/... ./internal/store/postgres/... ./internal/handler/... -run Integration -count=1 -v
       - name: 冒烟测试
         run: |
           set -euo pipefail
@@ -149,7 +149,7 @@ jobs:
 
   image:
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    needs: [backend, frontend, integration]
     permissions:
       contents: read
       packages: write

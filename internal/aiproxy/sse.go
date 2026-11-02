@@ -44,10 +44,25 @@ type lineEvent struct {
 //   - 90s 无任何上游字节视为空闲超时
 //   - 上游缺 usage 时用估算值补一帧，再转发 [DONE]
 func Relay(ctx context.Context, w http.ResponseWriter, upstream io.Reader, meta Meta,
-	promptEstimate int, maxOutput int) (StreamResult, error) {
+	promptEstimate int, maxOutput int) (res StreamResult, relayErr error) {
 
-	res := StreamResult{PromptTokens: promptEstimate}
+	res.PromptTokens = promptEstimate
 	start := time.Now()
+	var completion strings.Builder
+	usageSeen := false
+	finalizeUsage := func() {
+		if !usageSeen {
+			res.Estimated = true
+			res.CompletionTokens = min(EstimateTokens(completion.String()), maxOutput)
+		}
+	}
+	// 正常结束、客户端取消和上游断流都必须结算已接收到的内容。
+	defer func() {
+		finalizeUsage()
+		res.TotalMS = int(time.Since(start).Milliseconds())
+	}()
+	readCtx, cancelRead := context.WithCancel(ctx)
+	defer cancelRead()
 
 	rc := http.NewResponseController(w)
 	_ = rc.SetWriteDeadline(time.Time{}) // 流式响应不设写超时
@@ -59,6 +74,14 @@ func Relay(ctx context.Context, w http.ResponseWriter, upstream io.Reader, meta 
 		return nil
 	}
 	flush := func() error { return rc.Flush() }
+	writeTimeout := func() {
+		_ = write("event: error\ndata: " +
+			mustJSON(map[string]any{"error": map[string]any{
+				"code": "UPSTREAM_TIMEOUT", "message": "模型响应超时，请重试",
+				"request_id": meta.RequestID,
+			}}) + "\n\n")
+		_ = flush()
+	}
 
 	metaJSON, _ := json.Marshal(meta)
 	if err := write("event: meta\ndata: " + string(metaJSON) + "\n\n"); err != nil {
@@ -78,14 +101,14 @@ func Relay(ctx context.Context, w http.ResponseWriter, upstream io.Reader, meta 
 			if line != "" {
 				select {
 				case lines <- lineEvent{line: line}:
-				case <-ctx.Done():
+				case <-readCtx.Done():
 					return
 				}
 			}
 			if err != nil {
 				select {
 				case lines <- lineEvent{err: err}:
-				case <-ctx.Done():
+				case <-readCtx.Done():
 				}
 				return
 			}
@@ -98,31 +121,34 @@ func Relay(ctx context.Context, w http.ResponseWriter, upstream io.Reader, meta 
 	defer idle.Stop()
 
 	done := false
-	var completion strings.Builder
-	usageSeen := false
 
 	for !done {
 		select {
 		case <-ctx.Done():
-			// 客户端断开：直接返回，由调用方取消上游请求。
-			return res, nil
+			if ctx.Err() == context.DeadlineExceeded {
+				writeTimeout()
+			}
+			return res, ctx.Err()
 
 		case <-ping.C:
 			if err := write(": ping\n\n"); err != nil {
-				return res, nil
+				return res, err
 			}
-			_ = flush()
+			if err := flush(); err != nil {
+				return res, err
+			}
 
 		case <-idle.C:
-			_ = write("event: error\ndata: " +
-				mustJSON(map[string]any{"error": map[string]any{
-					"code": "UPSTREAM_TIMEOUT", "message": "模型响应超时，请重试",
-					"request_id": meta.RequestID,
-				}}) + "\n\n")
-			_ = flush()
-			return res, fmt.Errorf("上游空闲超时")
+			writeTimeout()
+			return res, fmt.Errorf("上游空闲超时: %w", context.DeadlineExceeded)
 
 		case ev, ok := <-lines:
+			if ctx.Err() != nil {
+				if ctx.Err() == context.DeadlineExceeded {
+					writeTimeout()
+				}
+				return res, ctx.Err()
+			}
 			if !ok {
 				return res, fmt.Errorf("上游连接中断")
 			}
@@ -146,9 +172,11 @@ func Relay(ctx context.Context, w http.ResponseWriter, upstream io.Reader, meta 
 
 			if trimmed == "" {
 				if err := write("\n"); err != nil {
-					return res, nil
+					return res, err
 				}
-				_ = flush()
+				if err := flush(); err != nil {
+					return res, err
+				}
 				continue
 			}
 
@@ -157,11 +185,7 @@ func Relay(ctx context.Context, w http.ResponseWriter, upstream io.Reader, meta 
 
 				if payload == "[DONE]" {
 					if !usageSeen {
-						res.Estimated = true
-						res.CompletionTokens = EstimateTokens(completion.String())
-						if res.CompletionTokens > maxOutput {
-							res.CompletionTokens = maxOutput
-						}
+						finalizeUsage()
 						inject := map[string]any{
 							"choices": []any{},
 							"usage": Usage{
@@ -171,12 +195,17 @@ func Relay(ctx context.Context, w http.ResponseWriter, upstream io.Reader, meta 
 								Estimated:        true,
 							},
 						}
-						_ = write("data: " + mustJSON(inject) + "\n\n")
+						if err := write("data: " + mustJSON(inject) + "\n\n"); err != nil {
+							return res, err
+						}
 					}
-					if err := write(line); err != nil {
-						return res, nil
+					// SSE 必须以空行结束事件，不能只转发 [DONE] 所在的一行。
+					if err := write("data: [DONE]\n\n"); err != nil {
+						return res, err
 					}
-					_ = flush()
+					if err := flush(); err != nil {
+						return res, err
+					}
 					done = true
 					break
 				}
@@ -205,16 +234,11 @@ func Relay(ctx context.Context, w http.ResponseWriter, upstream io.Reader, meta 
 			}
 
 			if err := write(line); err != nil {
-				return res, nil
+				return res, err
 			}
 		}
 	}
 
-	res.TotalMS = int(time.Since(start).Milliseconds())
-	if res.CompletionTokens == 0 && completion.Len() > 0 {
-		res.CompletionTokens = EstimateTokens(completion.String())
-		res.Estimated = true
-	}
 	return res, nil
 }
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 
 	"github.com/starschedule/server/internal/model"
@@ -28,7 +30,7 @@ func (s *Store) GetSettings(ctx context.Context) (map[string]json.RawMessage, er
 	return out, rows.Err()
 }
 
-// SetSettings 写入运行时参数（合并语义由调用方决定）。
+// SetSettings 在同一事务中合并运行时参数；nil 表示删除覆盖值。
 func (s *Store) SetSettings(ctx context.Context, values map[string]any) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -36,7 +38,15 @@ func (s *Store) SetSettings(ctx context.Context, values map[string]any) error {
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 
-	for k, v := range values {
+	// 固定加锁顺序，避免并发更新多项配置时互相等待。
+	for _, k := range slices.Sorted(maps.Keys(values)) {
+		v := values[k]
+		if v == nil {
+			if _, err := tx.Exec(ctx, `DELETE FROM app_settings WHERE key = $1`, k); err != nil {
+				return err
+			}
+			continue
+		}
 		raw, err := json.Marshal(v)
 		if err != nil {
 			return fmt.Errorf("序列化参数 %s: %w", k, err)

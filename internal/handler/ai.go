@@ -321,11 +321,13 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 
 	var quotaKey string
 	var charged int64
+	usageDate := d.Device.Today()
+	quotaReset := usageDate.AddDate(0, 0, 1)
 	// 额度为 0 视为不限量（后台可配）。
 	if caller.ApplyQuota && caller.DeviceID != nil && settings.DailyTokenQuota > 0 {
-		quotaKey = redisc.QuotaKey(caller.DeviceID.String(), d.Device.Today().Format("2006-01-02"))
+		quotaKey = redisc.QuotaKey(caller.DeviceID.String(), usageDate.Format("2006-01-02"))
 		charged = int64(promptEstimate + maxOutput)
-		ttl := time.Until(d.resetAt()) + time.Hour
+		ttl := time.Until(quotaReset) + time.Hour
 		allowed, used, qerr := d.Redis.PrechargeQuota(ctx, quotaKey, charged, settings.DailyTokenQuota, ttl)
 		if qerr != nil {
 			respond.Error(c, http.StatusServiceUnavailable, respond.CodeQuotaUnavailable,
@@ -339,7 +341,7 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 				map[string]any{
 					"daily_quota":      settings.DailyTokenQuota,
 					"used":             used,
-					"reset_at":         d.resetAt().Format(time.RFC3339),
+					"reset_at":         quotaReset.Format(time.RFC3339),
 					"requested_tokens": charged,
 				})
 			return
@@ -347,30 +349,32 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 	}
 
 	settled := false
-	settle := func(prompt, completion int, estimated bool) {
+	settle := func(usage aiproxy.Usage, isError bool) {
 		if settled {
 			return
 		}
 		settled = true
-		bg := context.WithoutCancel(ctx)
+		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
 		if quotaKey != "" {
-			actual := int64(prompt + completion)
-			_ = d.Redis.SettleQuota(bg, quotaKey, actual-charged, time.Until(d.resetAt())+time.Hour)
+			actual := int64(usage.PromptTokens + usage.CompletionTokens)
+			if err := d.Redis.SettleQuota(bg, quotaKey, actual-charged, time.Until(quotaReset)+time.Hour); err != nil {
+				d.Logger.Warn("结算 AI 额度失败", "error", err, "request_id", requestID)
+			}
 		}
 		if caller.DeviceID != nil {
-			if err := d.Store.IncrUsage(bg, d.Device.Today(), *caller.DeviceID,
-				int64(prompt), int64(completion), estimated, false); err != nil {
+			if err := d.Store.IncrUsage(bg, usageDate, *caller.DeviceID,
+				int64(usage.PromptTokens), int64(usage.CompletionTokens), usage.Estimated, isError); err != nil {
 				d.Logger.Warn("写入 AI 用量失败", "error", err)
 			}
 		}
-		metrics.AITokens.WithLabelValues(snap.Alias, "prompt").Add(float64(prompt))
-		metrics.AITokens.WithLabelValues(snap.Alias, "completion").Add(float64(completion))
+		metrics.AITokens.WithLabelValues(snap.Alias, "prompt").Add(float64(usage.PromptTokens))
+		metrics.AITokens.WithLabelValues(snap.Alias, "completion").Add(float64(usage.CompletionTokens))
 	}
 	defer func() {
-		if !settled && quotaKey != "" {
-			// 未走到上游或提前失败：整笔退还预扣额度。
-			_ = d.Redis.SettleQuota(context.WithoutCancel(ctx), quotaKey, -charged,
-				time.Until(d.resetAt())+time.Hour)
+		if !settled {
+			// 提前失败：整笔退还预扣额度，同时记录一次失败请求。
+			settle(aiproxy.Usage{}, true)
 		}
 	}()
 
@@ -382,9 +386,17 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 	}
 
 	started := time.Now()
-	resp, err := d.AI.OpenChat(ctx, snap.BaseURL, apiKey,
+	timeout := time.Duration(snap.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
+	// 同一个截止时间覆盖连接、响应头和响应体读取，也适用于 SSE。
+	upstreamCtx, cancelUpstream := context.WithTimeout(ctx, timeout)
+	defer cancelUpstream()
+	resp, err := d.AI.OpenChat(upstreamCtx, snap.BaseURL, apiKey,
 		req.BuildUpstream(snap.ModelID, maxOutput, req.Stream, reasoningEffort))
 	if err != nil {
+		settle(aiproxy.Usage{}, true)
 		d.writeRequestLog(c, caller, snap, reqLogOptions{
 			Stream:     req.Stream,
 			Status:     "error",
@@ -401,18 +413,23 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 	if !req.Stream {
 		out, err := aiproxy.ReadNonStream(resp.Body, snap.Alias, promptEstimate)
 		if err != nil {
+			settle(aiproxy.Usage{}, true)
+			status, code, message := http.StatusBadGateway, respond.CodeUpstreamError, "上游响应异常，请稍后重试"
+			if errors.Is(upstreamCtx.Err(), context.DeadlineExceeded) {
+				status, code, message = http.StatusGatewayTimeout, respond.CodeUpstreamTimeout, "模型响应超时，请重试"
+			}
 			d.writeRequestLog(c, caller, snap, reqLogOptions{
 				Status:     "error",
-				HTTPStatus: http.StatusBadGateway,
-				ErrorCode:  respond.CodeUpstreamError,
+				HTTPStatus: status,
+				ErrorCode:  code,
 				TotalMS:    int(time.Since(started).Milliseconds()),
 			})
 			metrics.AIRequests.WithLabelValues(caller.Source, snap.Alias, "error").Inc()
-			respond.Error(c, http.StatusBadGateway, respond.CodeUpstreamError, "上游响应异常，请稍后重试", nil)
+			respond.Error(c, status, code, message, nil)
 			return
 		}
 		out.ID = requestID
-		settle(out.Usage.PromptTokens, out.Usage.CompletionTokens, out.Usage.Estimated)
+		settle(out.Usage, false)
 		total := int(time.Since(started).Milliseconds())
 		d.writeRequestLog(c, caller, snap, reqLogOptions{
 			Usage:      out.Usage,
@@ -440,7 +457,7 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 	header.Set("X-Accel-Buffering", "no")
 	c.Status(http.StatusOK)
 
-	res, relayErr := aiproxy.Relay(ctx, c.Writer, resp.Body, aiproxy.Meta{
+	res, relayErr := aiproxy.Relay(upstreamCtx, c.Writer, resp.Body, aiproxy.Meta{
 		ID:        requestID,
 		Model:     snap.Alias,
 		Alias:     snap.Alias,
@@ -453,11 +470,11 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 		TotalTokens:      res.PromptTokens + res.CompletionTokens,
 		Estimated:        res.Estimated,
 	}
-	settle(usage.PromptTokens, usage.CompletionTokens, usage.Estimated)
+	settle(usage, relayErr != nil)
 
 	status, code := "ok", ""
 	if relayErr != nil {
-		status, code = "error", respond.CodeUpstreamError
+		status, code = "error", upstreamCode(relayErr)
 		d.Logger.Warn("SSE 转发中断", "error", relayErr, "request_id", requestID)
 	}
 	if res.FirstTokenMS > 0 {
@@ -481,6 +498,9 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 }
 
 func (d *Deps) respondUpstreamError(c *gin.Context, err error) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
 	var up *aiproxy.UpstreamError
 	if errors.As(err, &up) {
 		switch up.Kind {
@@ -502,9 +522,6 @@ func (d *Deps) respondUpstreamError(c *gin.Context, err error) {
 			"上游服务异常，请稍后重试", nil)
 		return
 	}
-	if errors.Is(err, context.Canceled) {
-		return
-	}
 	respond.Error(c, http.StatusGatewayTimeout, respond.CodeUpstreamTimeout, "上游服务超时", nil)
 }
 
@@ -520,6 +537,9 @@ func mapUpstreamStatus(err error) int {
 }
 
 func upstreamCode(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return respond.CodeUpstreamTimeout
+	}
 	var up *aiproxy.UpstreamError
 	if errors.As(err, &up) && up.Kind == "timeout" {
 		return respond.CodeUpstreamTimeout

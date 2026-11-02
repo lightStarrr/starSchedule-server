@@ -29,7 +29,8 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:8080',
-        changeOrigin: true,
+        // 保留浏览器访问的 Host，后端才能正确校验管理请求的 Origin。
+        changeOrigin: false,
       },
     },
   },

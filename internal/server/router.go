@@ -83,7 +83,7 @@ func NewRouter(d *handler.Deps, cfg *config.Config) *gin.Engine {
 	admin := v1.Group("/admin")
 	admin.POST("/login", adminLoginLimit, d.AdminLogin)
 
-	authed := admin.Group("", middleware.AdminAuth(d.JWT), middleware.CSRFGuard())
+	authed := admin.Group("", middleware.AdminAuth(d.JWT), middleware.CSRFGuard(cfg.CORSOrigins...))
 	authed.POST("/logout", d.AdminLogout)
 	authed.GET("/me", d.AdminMe)
 

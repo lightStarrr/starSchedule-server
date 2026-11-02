@@ -254,7 +254,8 @@ func (s *Store) UpdateModel(ctx context.Context, id uuid.UUID, p ModelPatch) (*m
 		cur.ReasoningMode = *p.ReasoningMode
 	}
 	if p.ReasoningEfforts != nil {
-		cur.ReasoningEfforts = *p.ReasoningEfforts
+		// nil 切片会被 pgx 编码为 SQL NULL；无可选档位应保存为空数组。
+		cur.ReasoningEfforts = append([]string{}, (*p.ReasoningEfforts)...)
 	}
 	if p.ReasoningDefault != nil {
 		cur.ReasoningDefault = *p.ReasoningDefault

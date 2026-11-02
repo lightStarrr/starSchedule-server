@@ -2,7 +2,9 @@ package middleware
 
 import (
 	"errors"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -120,7 +122,13 @@ func AdminFrom(c *gin.Context) *model.AdminUser {
 }
 
 // CSRFGuard 对使用 Cookie 会话的状态变更请求做 Origin 校验。
-func CSRFGuard() gin.HandlerFunc {
+func CSRFGuard(allowedOrigins ...string) gin.HandlerFunc {
+	allowed := make(map[string]bool, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		if normalized, ok := normalizeOrigin(origin); ok {
+			allowed[normalized] = true
+		}
+	}
 	return func(c *gin.Context) {
 		if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
 			c.Next()
@@ -135,11 +143,40 @@ func CSRFGuard() gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		host := c.Request.Host
-		if !strings.Contains(origin, host) {
+		scheme := "http"
+		if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
+			scheme = "https"
+		}
+		expected, validHost := normalizeOrigin(scheme + "://" + c.Request.Host)
+		actual, validOrigin := normalizeOrigin(origin)
+		if !validOrigin || (!allowed[actual] && (!validHost || actual != expected)) {
 			respond.Error(c, http.StatusForbidden, respond.CodeUnauthenticated, "请求来源校验失败", nil)
 			return
 		}
 		c.Next()
 	}
+}
+
+// Origin 只能包含协议和 authority；默认端口与显式默认端口视为同源。
+func normalizeOrigin(raw string) (string, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Opaque != "" || u.User != nil || u.Hostname() == "" ||
+		u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(raw, "#") {
+		return "", false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	port := u.Port()
+	switch scheme {
+	case "http":
+		if port == "" {
+			port = "80"
+		}
+	case "https":
+		if port == "" {
+			port = "443"
+		}
+	default:
+		return "", false
+	}
+	return scheme + "://" + net.JoinHostPort(strings.ToLower(u.Hostname()), port), true
 }

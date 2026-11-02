@@ -277,7 +277,7 @@ data: {"error":{"code":"UPSTREAM_TIMEOUT","message":"模型响应超时，请重
 ```
 
 - 客户端以 `[DONE]` 与 `event: error` 作为终止条件，按 `delta.content` 增量拼接
-- **没有 `[DONE]` 的 EOF 视为异常终止**：上游连接中断时服务端直接断开，不发 `event: error`（只有 90 秒无数据才发 `UPSTREAM_TIMEOUT`）。客户端必须把「连接关闭但未收到 `[DONE]`」标记为失败，否则 UI 会停在半句话
+- **没有 `[DONE]` 的 EOF 视为异常终止**：上游连接中断时服务端直接断开，不发 `event: error`；90 秒无数据或达到供应商配置的整体超时时间时发送 `UPSTREAM_TIMEOUT`。整体超时覆盖连接、响应头与响应体，流式和非流式请求都生效。客户端必须把「连接关闭但未收到 `[DONE]`」标记为失败，否则 UI 会停在半句话
 - **不自动重连**：重连会重复计费，由用户手动重发；服务端 90 秒无上游数据会发 `event: error` 后关闭
 
 错误（写 200 之前）：`400 INVALID_ARGUMENT` / `400 MODEL_NOT_AVAILABLE` / `401` / `403 DEVICE_BANNED` / `413 PAYLOAD_TOO_LARGE` / `429 RATE_LIMITED` / `429 AI_QUOTA_EXCEEDED` / `502 UPSTREAM_ERROR` / `503 QUOTA_SERVICE_UNAVAILABLE` / `504 UPSTREAM_TIMEOUT`
@@ -333,7 +333,7 @@ data: {"error":{"code":"UPSTREAM_TIMEOUT","message":"模型响应超时，请重
 
 请求前会按「输入估算 + 最大输出」预扣额度，结束时按上游返回的实际用量差额结算：
 
-- 请求在任何阶段失败、或 SSE 中断，都会把预扣额度退回（可能整笔退，也可能按实际用量退差额）
+- 上游连接或非流式响应解析失败时整笔退还预扣额度；SSE 中断时仍结算已接收的内容，没有上游 usage 时估算已接收的输出，再退还预扣差额。跨零点结束的请求，其日用量和额度归入开始调用时的日期。
 - 因此**客户端不要本地累加用量**，需要展示时重新拉 `/ai/usage`
 
 按接口的限流（都按设备维度，超限返回 `429 RATE_LIMITED` 且带 `Retry-After`）：

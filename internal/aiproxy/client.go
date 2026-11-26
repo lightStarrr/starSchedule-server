@@ -147,7 +147,12 @@ func ReadNonStream(reader io.Reader, alias string, promptEstimate int) (*ChatRes
 	if out.Usage.TotalTokens == 0 {
 		completion := 0
 		for _, ch := range out.Choices {
-			completion += EstimateTokens(ch.Message.Content)
+			completion += EstimateTokens(ch.Message.Content) +
+				EstimateTokens(ch.Message.ReasoningContent)
+			for _, tc := range ch.Message.ToolCalls {
+				completion += EstimateTokens(tc.Function.Name) +
+					EstimateTokens(tc.Function.Arguments) + 4
+			}
 		}
 		out.Usage = Usage{
 			PromptTokens:     promptEstimate,

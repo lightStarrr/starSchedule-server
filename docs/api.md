@@ -7,7 +7,7 @@
 - **无信封**：成功直接返回业务对象，失败 `{error:{...}}`
 - **列表**：分页列表为 `{items, next_cursor, has_more, total_estimate?}`；`/ai/models` 不是分页列表，结构见第 6 节
 - **幂等**：注册按 `install_id`，启动上报按 `session_id`，重试必须复用同一值
-- **请求体上限**：所有 JSON 接口 1 MiB，超出返回 `413 PAYLOAD_TOO_LARGE`（`/ai/chat/completions` 另加 messages ≤131072 字节）
+- **请求体上限**：所有 JSON 接口 1 MiB，超出返回 `413 PAYLOAD_TOO_LARGE`（`/ai/chat/completions` 另加 `messages` + `tools` + `tool_choice` ≤131072 字节）
 
 ## 1. 请求头
 
@@ -211,8 +211,26 @@
 {
   "messages": [
     { "role": "system", "content": "你是星课表助手" },
-    { "role": "user", "content": "帮我把周三的课挪到周五" }
+    { "role": "user", "content": "帮我查一下周三有什么课" }
   ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_schedule",
+        "description": "查询指定星期几的课程列表",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "weekday": { "type": "integer", "description": "星期几，1-7" }
+          },
+          "required": ["weekday"]
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": true,
   "reasoning_effort": "medium",
   "stream": true
 }
@@ -220,7 +238,10 @@
 
 | 字段 | 类型 | 必需 | 约束 |
 | --- | --- | --- | --- |
-| `messages` | array | 是 | 1–100 条；`role ∈ {system,user,assistant}`；整段 ≤131072 字节，超出返回 `413 PAYLOAD_TOO_LARGE` |
+| `messages` | array | 是 | 1–100 条；`role ∈ {system,user,assistant,tool}`。`system`/`user` 的 `content` 不可空白；`assistant` 需提供 `content` 或 `tool_calls`；`tool` 必须提供 `tool_call_id`（`content` 可为空字符串）。支持可选 `name`、`reasoning_content`（思考模型多轮工具调用回传）。`messages` + `tools` + `tool_choice` 合计 ≤131072 字节，超出返回 `413 PAYLOAD_TOO_LARGE` |
+| `tools` | array | 否 | 最多 128 个；每项 `type` 必须为 `function`，`function.name` 唯一且 ≤128 字符，`function.parameters`（若提供）需为合法 JSON 对象，支持可选 `function.strict` |
+| `tool_choice` | string \| object | 否 | `"none"` / `"auto"` / `"required"`，或 `{"type":"function","function":{"name":"..."}}`；未传 `tools` 时仅允许 `"none"`，指定函数名时必须存在于 `tools` 中 |
+| `parallel_tool_calls` | bool | 否 | 是否允许单轮并行调用多个工具；未传 `tools` 时传该字段返回 `400 INVALID_ARGUMENT` |
 | `top_p` | float | 否 | 0–1 |
 | `stop` | string[] | 否 | ≤4 条 |
 | `reasoning_effort` | string | 否 | `minimal` / `low` / `medium` / `high`；不传则用后台配置的全局默认档位（服务端会自动降到该模型最近的可选档，不会越界下发）。模型不支持思考强度、或**显式传入**的档位不在该模型支持列表时返回 `400 INVALID_ARGUMENT` |
@@ -229,7 +250,7 @@
 
 温度与 `max_tokens` 不再对外开放：输出上限由服务端 `max_output_tokens` 统一控制。
 
-**非流式** `200 application/json`：
+**非流式** `200 application/json`（普通回复与 `tool_calls` 回复）：
 
 ```json
 {
@@ -242,6 +263,55 @@
   ],
   "usage": { "prompt_tokens": 12, "completion_tokens": 34, "total_tokens": 46, "estimated": false },
   "request_id": "01JB8Z3K4M5N6P7Q8R9S0T1U2V"
+}
+```
+
+模型触发工具调用时（`finish_reason: "tool_calls"`）：
+
+```json
+{
+  "id": "01JB8Z3K4M5N6P7Q8R9S0T1U2V",
+  "object": "chat.completion",
+  "created": 1761896599,
+  "model": "deepseek-chat",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_001",
+            "type": "function",
+            "function": { "name": "get_schedule", "arguments": "{\"weekday\":3}" }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": { "prompt_tokens": 48, "completion_tokens": 19, "total_tokens": 67, "estimated": false },
+  "request_id": "01JB8Z3K4M5N6P7Q8R9S0T1U2V"
+}
+```
+
+客户端在本地执行完工具后，将上一轮返回的 `assistant` 消息（原样保留 `tool_calls`、可选 `reasoning_content` 与 `extra_content`）以及对应的 `role: "tool"` 结果消息追加到 `messages` 中发起下一轮请求：
+
+```json
+{
+  "messages": [
+    { "role": "user", "content": "帮我查一下周三有什么课" },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        { "id": "call_001", "type": "function", "function": { "name": "get_schedule", "arguments": "{\"weekday\":3}" } }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "call_001", "content": "{\"courses\":[\"高等数学\"]}" }
+  ],
+  "tools": [ ... ]
 }
 ```
 
@@ -271,6 +341,21 @@ data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"promp
 data: [DONE]
 ```
 
+流式工具调用帧示例（按 `delta.tool_calls[].index` 聚合 `id`、`function.name` 与增量拼接 `function.arguments`）：
+
+```
+event: meta
+data: {"id":"01JB8Z...","model":"deepseek-chat","alias":"deepseek-chat","request_id":"01JB8Z..."}
+
+data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_001","type":"function","function":{"name":"get_schedule","arguments":""}}]}}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"weekday\":3}"}}]}}]}
+
+data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":48,"completion_tokens":19,"total_tokens":67,"estimated":false}}
+
+data: [DONE]
+```
+
 - 每 15 秒发注释帧 `: ping`，客户端忽略，不得当作结束
 - 流内错误发 `event: error` 后关闭，**不再发 `[DONE]`**：
 
@@ -279,7 +364,7 @@ event: error
 data: {"error":{"code":"UPSTREAM_TIMEOUT","message":"模型响应超时，请重试","request_id":"01JB8Z..."}}
 ```
 
-- 客户端以 `[DONE]` 与 `event: error` 作为终止条件，按 `delta.content` 增量拼接
+- 客户端以 `[DONE]` 与 `event: error` 作为终止条件，文本按 `delta.content` 增量拼接，工具调用按 `delta.tool_calls[].index` 增量聚合
 - **没有 `[DONE]` 的 EOF 视为异常终止**：上游连接中断时服务端直接断开，不发 `event: error`；90 秒无数据或达到供应商配置的整体超时时间时发送 `UPSTREAM_TIMEOUT`。整体超时覆盖连接、响应头与响应体，流式和非流式请求都生效。客户端必须把「连接关闭但未收到 `[DONE]`」标记为失败，否则 UI 会停在半句话
 - **不自动重连**：重连会重复计费，由用户手动重发；服务端 90 秒无上游数据会发 `event: error` 后关闭
 

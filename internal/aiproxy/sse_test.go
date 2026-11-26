@@ -157,3 +157,40 @@ func TestRelayDeadlineSettlesPartialOutput(t *testing.T) {
 		t.Fatal("应向客户端发送超时事件")
 	}
 }
+
+func TestRelayToolCallsAndEstimatedUsage(t *testing.T) {
+	upstream := strings.NewReader(
+		"data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"get_schedule\",\"arguments\":\"\"}}]}}]}\n\n" +
+			"data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"weekday\\\":3}\"}}]}}]}\n\n" +
+			"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+			"data: [DONE]\n\n")
+
+	rec := httptest.NewRecorder()
+	res, err := Relay(context.Background(), rec, upstream,
+		Meta{ID: "req-tc", Model: "star", Alias: "star", RequestID: "req-tc"}, 20, 4096)
+	if err != nil {
+		t.Fatalf("Relay 返回错误: %v", err)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"tool_calls"`) || !strings.Contains(body, `"get_schedule"`) {
+		t.Fatalf("未透传 tool_calls 增量帧: %s", body)
+	}
+	if res.FinishReason != "tool_calls" {
+		t.Fatalf("FinishReason 期望 tool_calls，实际 %q", res.FinishReason)
+	}
+	if !res.Estimated || res.CompletionTokens <= 0 || res.ContentBytes == 0 {
+		t.Fatalf("纯 tool_calls 流缺失 usage 时应估算输出 token: %+v", res)
+	}
+}
+
+func TestRelaySettlesPartialToolCallsOnDisconnect(t *testing.T) {
+	res, err := Relay(context.Background(), httptest.NewRecorder(),
+		strings.NewReader("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"search\",\"arguments\":\"{\\\"q\\\":\\\"高数\\\"}\"}}]}}]}\n\n"),
+		Meta{}, 15, 4096)
+	if err == nil {
+		t.Fatal("缺少 DONE 应返回中断错误")
+	}
+	if !res.Estimated || res.CompletionTokens <= 0 || res.ContentBytes == 0 {
+		t.Fatalf("tool_calls 流中断也应估算已接收输出: %+v", res)
+	}
+}

@@ -218,13 +218,22 @@ func Relay(ctx context.Context, w http.ResponseWriter, upstream io.Reader, meta 
 						res.CompletionTokens = chunk.Usage.CompletionTokens
 						res.Estimated = false
 					}
+					recordOutput := func(s string) {
+						if s == "" {
+							return
+						}
+						if res.FirstTokenMS == 0 {
+							res.FirstTokenMS = int(time.Since(start).Milliseconds())
+						}
+						completion.WriteString(s)
+						res.ContentBytes += len(s)
+					}
 					for _, ch := range chunk.Choices {
-						if ch.Delta.Content != "" {
-							if res.FirstTokenMS == 0 {
-								res.FirstTokenMS = int(time.Since(start).Milliseconds())
-							}
-							completion.WriteString(ch.Delta.Content)
-							res.ContentBytes += len(ch.Delta.Content)
+						recordOutput(ch.Delta.Content)
+						recordOutput(ch.Delta.ReasoningContent)
+						for _, tc := range ch.Delta.ToolCalls {
+							recordOutput(tc.Function.Name)
+							recordOutput(tc.Function.Arguments)
 						}
 						if ch.FinishReason != nil && *ch.FinishReason != "" {
 							res.FinishReason = *ch.FinishReason

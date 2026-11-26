@@ -282,7 +282,7 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 		defer d.Redis.ReleaseInflight(context.WithoutCancel(ctx), inflightKey)
 	}
 
-	promptEstimate := aiproxy.EstimateMessagesTokens(req.Messages)
+	promptEstimate := req.EstimatePromptTokens()
 	maxOutput := settings.MaxOutputTokens
 
 	// 思考强度：只有探测为 effort 的模型才接受，其余明确拒绝而不是静默忽略

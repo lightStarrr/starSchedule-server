@@ -61,8 +61,16 @@ func TestValidate(t *testing.T) {
 	if err := ok.Validate(4096, 1024); err != nil {
 		t.Fatalf("合法请求被拒绝: %v", err)
 	}
-	role := ChatRequest{Messages: []Message{{Role: "tool", Content: "x"}}}
-	if err := role.Validate(4096, 1024); err == nil {
+	missingToolCallID := ChatRequest{Messages: []Message{{Role: "tool", Content: "x"}}}
+	if err := missingToolCallID.Validate(4096, 1024); err == nil {
+		t.Fatal("缺少 tool_call_id 的 tool 消息应该校验失败")
+	}
+	validTool := ChatRequest{Messages: []Message{{Role: "tool", ToolCallID: "call_1", Content: ""}}}
+	if err := validTool.Validate(4096, 1024); err != nil {
+		t.Fatalf("合法 tool 消息被拒绝: %v", err)
+	}
+	badRole := ChatRequest{Messages: []Message{{Role: "function", Content: "x"}}}
+	if err := badRole.Validate(4096, 1024); err == nil {
 		t.Fatal("非法 role 应该校验失败")
 	}
 }

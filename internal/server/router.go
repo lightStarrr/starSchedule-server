@@ -113,6 +113,7 @@ func NewRouter(d *handler.Deps, cfg *config.Config) *gin.Engine {
 	authed.DELETE("/ai/models/:id", d.AdminDeleteModel)
 	authed.GET("/ai/active", d.AdminGetActive)
 	authed.POST("/ai/playground", d.AIPlayground)
+	authed.GET("/ai/requests", d.AdminListAIRequests)
 	authed.GET("/ai/usage", d.AdminAIUsage)
 
 	authed.GET("/settings", d.AdminGetSettings)

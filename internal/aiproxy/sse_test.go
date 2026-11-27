@@ -194,3 +194,32 @@ func TestRelaySettlesPartialToolCallsOnDisconnect(t *testing.T) {
 		t.Fatalf("tool_calls 流中断也应估算已接收输出: %+v", res)
 	}
 }
+
+func TestRelayCachedTokensAndStartedAt(t *testing.T) {
+	started := time.Now().Add(-150 * time.Millisecond)
+	upstream := strings.NewReader(
+		"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"你好\"}}]}\n\n" +
+			"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":25,\"total_tokens\":125,\"prompt_cache_hit_tokens\":80}}\n\n" +
+			"data: [DONE]\n\n")
+
+	res, err := Relay(context.Background(), httptest.NewRecorder(), upstream,
+		Meta{ID: "r-cache", Model: "m", Alias: "m", RequestID: "r-cache", StartedAt: started}, 10, 4096)
+	if err != nil {
+		t.Fatalf("Relay 返回错误: %v", err)
+	}
+	if !res.HasFirstToken || res.FirstTokenMS < 100 || res.TotalMS < res.FirstTokenMS {
+		t.Fatalf("StartedAt 未正确计入耗时: %+v", res)
+	}
+	if res.CachedTokens != 80 {
+		t.Fatalf("CachedTokens = %d，期望 80", res.CachedTokens)
+	}
+
+	emptyStream := strings.NewReader("data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	resEmpty, err := Relay(context.Background(), httptest.NewRecorder(), emptyStream, Meta{}, 10, 4096)
+	if err != nil {
+		t.Fatalf("空流返回错误: %v", err)
+	}
+	if resEmpty.HasFirstToken {
+		t.Fatalf("无输出内容时不应标记 HasFirstToken: %+v", resEmpty)
+	}
+}

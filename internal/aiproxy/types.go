@@ -104,8 +104,37 @@ type upstreamRequest struct {
 type Usage struct {
 	PromptTokens     int  `json:"prompt_tokens"`
 	CompletionTokens int  `json:"completion_tokens"`
+	CachedTokens     int  `json:"cached_tokens,omitempty"`
 	TotalTokens      int  `json:"total_tokens"`
 	Estimated        bool `json:"estimated"`
+}
+
+// upstreamUsage 兼容解析多家 OpenAI 兼容上游的缓存命中 token 字段。
+type upstreamUsage struct {
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"`
+	TotalTokens         int `json:"total_tokens"`
+	PromptCacheHit      int `json:"prompt_cache_hit_tokens"`
+	CacheReadInput      int `json:"cache_read_input_tokens"`
+	PromptTokensDetails *struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+}
+
+func (u *upstreamUsage) cachedTokens() int {
+	if u == nil {
+		return 0
+	}
+	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens > 0 {
+		return u.PromptTokensDetails.CachedTokens
+	}
+	if u.PromptCacheHit > 0 {
+		return u.PromptCacheHit
+	}
+	if u.CacheReadInput > 0 {
+		return u.CacheReadInput
+	}
+	return 0
 }
 
 type Choice struct {
@@ -143,11 +172,7 @@ type streamChunk struct {
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+	Usage *upstreamUsage `json:"usage"`
 }
 
 // ReasoningEfforts 是 OpenAI 兼容的思考强度档位。

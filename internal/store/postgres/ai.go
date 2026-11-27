@@ -2,8 +2,11 @@ package postgres
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -491,6 +494,7 @@ type RequestLog struct {
 	ErrorCode        string
 	PromptTokens     int
 	CompletionTokens int
+	CachedTokens     int
 	TotalTokens      int
 	Estimated        bool
 	FirstTokenMS     *int
@@ -501,12 +505,244 @@ func (s *Store) InsertRequestLog(ctx context.Context, l RequestLog) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO ai_request_log (id, request_id, device_id, admin_id, stat_date, provider_id,
 			model, stream, source, status, http_status, error_code, prompt_tokens, completion_tokens,
-			total_tokens, estimated, first_token_ms, total_ms)
-		VALUES ($1,$2,$3,$4,$5::date,$6,$7,$8,$9,$10,$11,NULLIF($12,''),$13,$14,$15,$16,$17,$18)`,
+			cached_tokens, total_tokens, estimated, first_token_ms, total_ms)
+		VALUES ($1,$2,$3,$4,$5::date,$6,$7,$8,$9,$10,$11,NULLIF($12,''),$13,$14,$15,$16,$17,$18,$19)`,
 		l.ID, l.RequestID, l.DeviceID, l.AdminID, dateStr(l.StatDate), l.ProviderID, l.Model, l.Stream,
 		l.Source, l.Status, l.HTTPStatus, l.ErrorCode, l.PromptTokens, l.CompletionTokens,
-		l.TotalTokens, l.Estimated, l.FirstTokenMS, l.TotalMS)
+		l.CachedTokens, l.TotalTokens, l.Estimated, l.FirstTokenMS, l.TotalMS)
 	return err
+}
+
+type AIRequestFilter struct {
+	From     *time.Time
+	To       *time.Time
+	DeviceID *uuid.UUID
+	Model    string
+	Stream   *bool
+	Status   string
+	Source   string
+	Query    string
+	Limit    int
+	Cursor   string
+}
+
+type AIRequestLogItem struct {
+	ID               uuid.UUID  `json:"id"`
+	RequestID        string     `json:"request_id"`
+	CreatedAt        time.Time  `json:"created_at"`
+	Source           string     `json:"source"`
+	DeviceID         *uuid.UUID `json:"device_id,omitempty"`
+	InstallID        string     `json:"install_id,omitempty"`
+	AdminID          *uuid.UUID `json:"admin_id,omitempty"`
+	AdminUsername    string     `json:"admin_username,omitempty"`
+	ProviderName     string     `json:"provider_name,omitempty"`
+	Model            string     `json:"model"`
+	Stream           bool       `json:"stream"`
+	Status           string     `json:"status"`
+	HTTPStatus       int        `json:"http_status"`
+	ErrorCode        string     `json:"error_code,omitempty"`
+	PromptTokens     int        `json:"prompt_tokens"`
+	CompletionTokens int        `json:"completion_tokens"`
+	CachedTokens     int        `json:"cached_tokens"`
+	TotalTokens      int        `json:"total_tokens"`
+	Estimated        bool       `json:"estimated"`
+	FirstTokenMS     *int       `json:"first_token_ms,omitempty"`
+	TotalMS          *int       `json:"total_ms,omitempty"`
+	TPS              *float64   `json:"tps,omitempty"`
+}
+
+// ComputeStreamTPS 计算流式请求扣除首 Token 后的纯生成速度（tokens/s，保留 1 位小数）。
+// 缺少首 Token 耗时或生成阶段耗时 <= 0 时返回 nil，不与首字等待混算。
+func ComputeStreamTPS(stream bool, completionTokens int, firstTokenMS, totalMS *int) *float64 {
+	if !stream || completionTokens <= 0 || firstTokenMS == nil || totalMS == nil || *firstTokenMS < 0 {
+		return nil
+	}
+	decodeMS := *totalMS - *firstTokenMS
+	if decodeMS <= 0 {
+		return nil
+	}
+	tps := math.Round(float64(completionTokens)/(float64(decodeMS)/1000.0)*10) / 10
+	return &tps
+}
+
+type aiRequestCursor struct {
+	CreatedAt time.Time `json:"t"`
+	ID        uuid.UUID `json:"i"`
+}
+
+func encodeAIRequestCursor(c aiRequestCursor) string {
+	raw, _ := json.Marshal(c)
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func decodeAIRequestCursor(v string) (aiRequestCursor, error) {
+	var c aiRequestCursor
+	raw, err := base64.RawURLEncoding.DecodeString(v)
+	if err != nil {
+		return c, err
+	}
+	err = json.Unmarshal(raw, &c)
+	return c, err
+}
+
+func buildAIRequestWhere(f AIRequestFilter, includeCursor bool) (string, []any, error) {
+	where := []string{"1 = 1"}
+	args := []any{}
+	if f.From != nil {
+		args = append(args, dateStr(*f.From))
+		where = append(where, fmt.Sprintf("l.stat_date >= $%d::date", len(args)))
+	}
+	if f.To != nil {
+		args = append(args, dateStr(*f.To))
+		where = append(where, fmt.Sprintf("l.stat_date <= $%d::date", len(args)))
+	}
+	if f.DeviceID != nil {
+		args = append(args, *f.DeviceID)
+		where = append(where, fmt.Sprintf("l.device_id = $%d", len(args)))
+	}
+	if m := strings.TrimSpace(f.Model); m != "" {
+		args = append(args, m)
+		where = append(where, fmt.Sprintf("l.model = $%d", len(args)))
+	}
+	if f.Stream != nil {
+		args = append(args, *f.Stream)
+		where = append(where, fmt.Sprintf("l.stream = $%d", len(args)))
+	}
+	if s := strings.TrimSpace(f.Status); s != "" {
+		args = append(args, s)
+		where = append(where, fmt.Sprintf("l.status = $%d", len(args)))
+	}
+	if src := strings.TrimSpace(f.Source); src != "" {
+		args = append(args, src)
+		where = append(where, fmt.Sprintf("l.source = $%d", len(args)))
+	}
+	if q := strings.TrimSpace(f.Query); q != "" {
+		args = append(args, "%"+q+"%")
+		n := len(args)
+		where = append(where, fmt.Sprintf(
+			"(COALESCE(d.install_id, '') ILIKE $%d OR COALESCE(l.device_id::text, '') ILIKE $%d OR COALESCE(a.username, '') ILIKE $%d OR l.request_id ILIKE $%d)",
+			n, n, n, n))
+	}
+	if includeCursor && f.Cursor != "" {
+		cur, err := decodeAIRequestCursor(f.Cursor)
+		if err != nil {
+			return "", nil, fmt.Errorf("游标无效: %w", err)
+		}
+		args = append(args, cur.CreatedAt, cur.ID)
+		where = append(where, fmt.Sprintf("(l.created_at, l.id) < ($%d, $%d)", len(args)-1, len(args)))
+	}
+	return strings.Join(where, " AND "), args, nil
+}
+
+// ListAIRequests 按时间倒序游标分页查询 AI 请求明细。
+func (s *Store) ListAIRequests(ctx context.Context, f AIRequestFilter) ([]AIRequestLogItem, string, bool, error) {
+	if f.Limit <= 0 || f.Limit > 100 {
+		f.Limit = 20
+	}
+	whereSQL, args, err := buildAIRequestWhere(f, true)
+	if err != nil {
+		return nil, "", false, err
+	}
+	args = append(args, f.Limit+1)
+	query := fmt.Sprintf(`
+		SELECT l.id, l.request_id, l.created_at, l.source,
+		       l.device_id, COALESCE(d.install_id, ''),
+		       l.admin_id, COALESCE(a.username, ''),
+		       COALESCE(p.name, ''), l.model, l.stream, l.status, l.http_status,
+		       COALESCE(l.error_code, ''), l.prompt_tokens, l.completion_tokens,
+		       l.cached_tokens, l.total_tokens, l.estimated, l.first_token_ms, l.total_ms
+		FROM ai_request_log l
+		LEFT JOIN devices d ON d.id = l.device_id
+		LEFT JOIN admin_users a ON a.id = l.admin_id
+		LEFT JOIN ai_providers p ON p.id = l.provider_id
+		WHERE %s
+		ORDER BY l.created_at DESC, l.id DESC
+		LIMIT $%d`, whereSQL, len(args))
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, "", false, err
+	}
+	defer rows.Close()
+
+	out := []AIRequestLogItem{}
+	for rows.Next() {
+		var item AIRequestLogItem
+		if err := rows.Scan(
+			&item.ID, &item.RequestID, &item.CreatedAt, &item.Source,
+			&item.DeviceID, &item.InstallID,
+			&item.AdminID, &item.AdminUsername,
+			&item.ProviderName, &item.Model, &item.Stream, &item.Status, &item.HTTPStatus,
+			&item.ErrorCode, &item.PromptTokens, &item.CompletionTokens,
+			&item.CachedTokens, &item.TotalTokens, &item.Estimated, &item.FirstTokenMS, &item.TotalMS,
+		); err != nil {
+			return nil, "", false, err
+		}
+		item.TPS = ComputeStreamTPS(item.Stream, item.CompletionTokens, item.FirstTokenMS, item.TotalMS)
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", false, err
+	}
+
+	hasMore := len(out) > f.Limit
+	if hasMore {
+		out = out[:f.Limit]
+	}
+	var next string
+	if hasMore && len(out) > 0 {
+		last := out[len(out)-1]
+		next = encodeAIRequestCursor(aiRequestCursor{CreatedAt: last.CreatedAt, ID: last.ID})
+	}
+	return out, next, hasMore, nil
+}
+
+func (s *Store) CountAIRequests(ctx context.Context, f AIRequestFilter) (int64, error) {
+	whereSQL, args, err := buildAIRequestWhere(f, false)
+	if err != nil {
+		return 0, err
+	}
+	var n int64
+	err = s.pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM ai_request_log l
+		LEFT JOIN devices d ON d.id = l.device_id
+		LEFT JOIN admin_users a ON a.id = l.admin_id
+		WHERE `+whereSQL, args...).Scan(&n)
+	return n, err
+}
+
+// ListAIRequestModels 返回时间范围内请求日志里出现过的模型列表（含已删除/停用模型）。
+func (s *Store) ListAIRequestModels(ctx context.Context, from, to *time.Time) ([]string, error) {
+	where := []string{"1 = 1"}
+	args := []any{}
+	if from != nil {
+		args = append(args, dateStr(*from))
+		where = append(where, fmt.Sprintf("stat_date >= $%d::date", len(args)))
+	}
+	if to != nil {
+		args = append(args, dateStr(*to))
+		where = append(where, fmt.Sprintf("stat_date <= $%d::date", len(args)))
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT model FROM ai_request_log
+		WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY model ASC LIMIT 200`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return nil, err
+		}
+		if m != "" {
+			out = append(out, m)
+		}
+	}
+	return out, rows.Err()
 }
 
 type UsageByDay struct {

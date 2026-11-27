@@ -25,6 +25,7 @@ const titles: Record<string, string> = {
   '/devices': '设备',
   '/ai/providers': 'AI 供应商',
   '/ai/models': '模型',
+  '/ai/requests': '请求日志',
   '/ai/playground': 'AI 试跑',
   '/usage': 'AI 用量',
   '/settings': '设置',

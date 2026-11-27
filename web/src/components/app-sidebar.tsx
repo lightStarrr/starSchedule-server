@@ -5,6 +5,7 @@ import {
   CpuIcon,
   LayoutDashboardIcon,
   MessageSquareIcon,
+  ScrollTextIcon,
   SettingsIcon,
   SmartphoneIcon,
 } from 'lucide-react'
@@ -38,6 +39,7 @@ const groups = [
     items: [
       { title: '供应商', url: '/ai/providers', icon: BotIcon },
       { title: '模型', url: '/ai/models', icon: CpuIcon },
+      { title: '请求日志', url: '/ai/requests', icon: ScrollTextIcon },
       { title: '试跑', url: '/ai/playground', icon: MessageSquareIcon },
     ],
   },

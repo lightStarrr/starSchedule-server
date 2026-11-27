@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router'
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
 import { BarChart3Icon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -209,7 +210,12 @@ export function UsagePage() {
                   <TableRow key={item.device_id}>
                     <TableCell>
                       <div className="flex flex-col gap-0.5">
-                        <span className="font-medium">{item.install_id.slice(0, 8) || '已删除设备'}…</span>
+                        <Link
+                          to={`/devices/${item.device_id}`}
+                          className="font-medium hover:underline"
+                        >
+                          {item.install_id.slice(0, 8) || '已删除设备'}…
+                        </Link>
                         <span className="font-mono text-xs text-muted-foreground">
                           {item.device_id.slice(0, 8)}…
                         </span>

@@ -36,6 +36,7 @@ export const routes: RouteObject[] = [
       { path: 'devices/:id', lazy: page(() => import('@/routes/device-detail'), 'DeviceDetailPage') },
       { path: 'ai/providers', lazy: page(() => import('@/routes/providers'), 'ProvidersPage') },
       { path: 'ai/models', lazy: page(() => import('@/routes/models'), 'ModelsPage') },
+      { path: 'ai/requests', lazy: page(() => import('@/routes/ai-requests'), 'AIRequestsPage') },
       { path: 'ai/playground', lazy: page(() => import('@/routes/playground'), 'PlaygroundPage') },
       { path: 'usage', lazy: page(() => import('@/routes/usage'), 'UsagePage') },
       { path: 'settings', lazy: page(() => import('@/routes/settings'), 'SettingsPage') },

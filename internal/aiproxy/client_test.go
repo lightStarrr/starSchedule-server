@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -101,5 +102,41 @@ func TestOpenChatAndReadNonStreamToolCalls(t *testing.T) {
 	}
 	if !out.Usage.Estimated || out.Usage.CompletionTokens <= 0 {
 		t.Fatalf("缺失 usage 时应按 tool_calls 和 reasoning_content 补算输出 token: %+v", out.Usage)
+	}
+}
+
+func TestReadNonStreamCachedTokens(t *testing.T) {
+	cases := []struct {
+		name   string
+		usage  string
+		expect int
+	}{
+		{
+			name:   "OpenAI_prompt_tokens_details",
+			usage:  `"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"prompt_tokens_details":{"cached_tokens":64}}`,
+			expect: 64,
+		},
+		{
+			name:   "DeepSeek_prompt_cache_hit_tokens",
+			usage:  `"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"prompt_cache_hit_tokens":48}`,
+			expect: 48,
+		},
+		{
+			name:   "Anthropic_cache_read_input_tokens",
+			usage:  `"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"cache_read_input_tokens":32}`,
+			expect: 32,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := `{"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],` + tc.usage + `}`
+			out, err := ReadNonStream(strings.NewReader(payload), "m", 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.Usage.CachedTokens != tc.expect {
+				t.Fatalf("CachedTokens = %d，期望 %d", out.Usage.CachedTokens, tc.expect)
+			}
+		})
 	}
 }

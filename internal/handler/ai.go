@@ -463,11 +463,13 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 		Model:     snap.Alias,
 		Alias:     snap.Alias,
 		RequestID: requestID,
+		StartedAt: started,
 	}, promptEstimate, maxOutput)
 
 	usage := aiproxy.Usage{
 		PromptTokens:     res.PromptTokens,
 		CompletionTokens: res.CompletionTokens,
+		CachedTokens:     res.CachedTokens,
 		TotalTokens:      res.PromptTokens + res.CompletionTokens,
 		Estimated:        res.Estimated,
 	}
@@ -478,12 +480,12 @@ func (d *Deps) handleChat(c *gin.Context, caller chatCaller, req *aiproxy.ChatRe
 		status, code = "error", upstreamCode(relayErr)
 		d.Logger.Warn("SSE 转发中断", "error", relayErr, "request_id", requestID)
 	}
-	if res.FirstTokenMS > 0 {
+	if res.HasFirstToken && res.FirstTokenMS > 0 {
 		metrics.UpstreamFirstToken.WithLabelValues(snap.Alias).Observe(float64(res.FirstTokenMS) / 1000)
 	}
 	metrics.AIRequests.WithLabelValues(caller.Source, snap.Alias, status).Inc()
 	var firstToken *int
-	if res.FirstTokenMS > 0 {
+	if res.HasFirstToken {
 		ft := res.FirstTokenMS
 		firstToken = &ft
 	}

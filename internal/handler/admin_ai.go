@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -624,6 +625,86 @@ func (d *Deps) AdminDeleteModel(c *gin.Context) {
 	}
 	d.Catalog.Invalidate(c.Request.Context())
 	c.Status(http.StatusNoContent)
+}
+
+// AdminListAIRequests GET /api/v1/admin/ai/requests
+func (d *Deps) AdminListAIRequests(c *gin.Context) {
+	ctx := c.Request.Context()
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	filter := postgres.AIRequestFilter{
+		Model:  c.Query("model"),
+		Query:  c.Query("q"),
+		Limit:  limit,
+		Cursor: c.Query("cursor"),
+	}
+	if v := strings.TrimSpace(c.Query("from")); v != "" {
+		t, err := time.ParseInLocation("2006-01-02", v, d.Loc)
+		if err != nil {
+			respond.InvalidArgument(c, "from 日期格式无效，应为 YYYY-MM-DD")
+			return
+		}
+		filter.From = &t
+	}
+	if v := strings.TrimSpace(c.Query("to")); v != "" {
+		t, err := time.ParseInLocation("2006-01-02", v, d.Loc)
+		if err != nil {
+			respond.InvalidArgument(c, "to 日期格式无效，应为 YYYY-MM-DD")
+			return
+		}
+		filter.To = &t
+	}
+	if v := strings.TrimSpace(c.Query("device_id")); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			respond.InvalidArgument(c, "device_id 无效")
+			return
+		}
+		filter.DeviceID = &id
+	}
+	if v := strings.TrimSpace(c.Query("stream")); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			respond.InvalidArgument(c, "stream 只能是 true 或 false")
+			return
+		}
+		filter.Stream = &b
+	}
+	if v := strings.TrimSpace(c.Query("status")); v != "" {
+		if v != "ok" && v != "error" {
+			respond.InvalidArgument(c, "status 只能是 ok 或 error")
+			return
+		}
+		filter.Status = v
+	}
+	if v := strings.TrimSpace(c.Query("source")); v != "" {
+		if v != model.RequestSourceDevice && v != model.RequestSourcePlayground {
+			respond.InvalidArgument(c, "source 只能是 device 或 playground")
+			return
+		}
+		filter.Source = v
+	}
+
+	items, nextCursor, hasMore, err := d.Store.ListAIRequests(ctx, filter)
+	if err != nil {
+		if strings.Contains(err.Error(), "游标无效") {
+			respond.InvalidArgument(c, "游标无效")
+			return
+		}
+		respond.Internal(c, "查询 AI 请求日志失败")
+		return
+	}
+	total, _ := d.Store.CountAIRequests(ctx, filter)
+	models, _ := d.Store.ListAIRequestModels(ctx, filter.From, filter.To)
+	c.JSON(http.StatusOK, gin.H{
+		"items":          items,
+		"next_cursor":    nextCursor,
+		"has_more":       hasMore,
+		"total_estimate": total,
+		"models":         models,
+	})
 }
 
 // AdminAIUsage GET /api/v1/admin/ai/usage?from=&to=&group_by=day|device

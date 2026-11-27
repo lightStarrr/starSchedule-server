@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router'
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
-import { ArrowLeftIcon, BanIcon, ShieldCheckIcon } from 'lucide-react'
+import { ArrowLeftIcon, BanIcon, ScrollTextIcon, ShieldCheckIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -111,6 +111,15 @@ export function DeviceDetailPage() {
             <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/devices" />}>
               <ArrowLeftIcon data-icon="inline-start" />
               返回
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={<Link to={`/ai/requests?device_id=${device.id}`} />}
+            >
+              <ScrollTextIcon data-icon="inline-start" />
+              AI 请求
             </Button>
             <Button
               variant={device.status === 'banned' ? 'default' : 'destructive'}

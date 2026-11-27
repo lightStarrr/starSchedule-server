@@ -118,6 +118,56 @@ const settings = {
   },
 }
 
+const aiRequests = {
+  items: [
+    {
+      id: 'r1',
+      request_id: 'req-001',
+      created_at: '2026-10-31T08:15:30Z',
+      source: 'device',
+      device_id: 'd1',
+      install_id: 'install-1234',
+      provider_name: 'deepseek',
+      model: 'deepseek-chat',
+      stream: true,
+      status: 'ok',
+      http_status: 200,
+      prompt_tokens: 1200,
+      completion_tokens: 240,
+      cached_tokens: 800,
+      total_tokens: 1440,
+      estimated: false,
+      first_token_ms: 500,
+      total_ms: 3500,
+      tps: 80.0,
+    },
+    {
+      id: 'r2',
+      request_id: 'req-002',
+      created_at: '2026-10-31T08:10:00Z',
+      source: 'playground',
+      admin_id: 'a1',
+      admin_username: 'admin',
+      provider_name: 'deepseek',
+      model: 'deepseek-chat',
+      stream: false,
+      status: 'error',
+      http_status: 502,
+      error_code: 'UPSTREAM_ERROR',
+      prompt_tokens: 300,
+      completion_tokens: 0,
+      cached_tokens: 0,
+      total_tokens: 300,
+      estimated: true,
+      total_ms: 420,
+    },
+  ],
+  next_cursor: '',
+  has_more: false,
+  total_estimate: 2,
+  models: ['deepseek-chat'],
+}
+
 /** 按路径返回固定数据，未覆盖的接口返回空对象。 */
 function mockApi() {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -134,6 +184,7 @@ function mockApi() {
       return json({ active: { provider_id: 'p1', provider_name: 'deepseek', model_id: 'm1', model: 'deepseek-chat', alias: 'deepseek-chat', display_name: 'DeepSeek Chat', context_window: 65536 } })
     if (path.startsWith('/api/v1/admin/ai/providers')) return json({ items: [provider] })
     if (path.startsWith('/api/v1/admin/ai/models')) return json({ items: [model] })
+    if (path.startsWith('/api/v1/admin/ai/requests')) return json(aiRequests)
     if (path.startsWith('/api/v1/admin/ai/usage'))
       return json({ group_by: 'day', items: [{ date: '2026-10-30', request_count: 3, tokens: 600, errors: 0 }] })
     if (path.startsWith('/api/v1/admin/settings')) return json(settings)
@@ -196,6 +247,7 @@ describe('管理后台页面渲染', () => {
     { path: '/devices/d1', heading: '设备 install-…' },
     { path: '/ai/providers', heading: 'AI 供应商' },
     { path: '/ai/models', heading: '模型' },
+    { path: '/ai/requests', heading: '请求日志' },
     { path: '/ai/playground', heading: 'AI 试跑' },
     { path: '/usage', heading: 'AI 用量' },
     { path: '/settings', heading: '设置' },
@@ -213,7 +265,7 @@ describe('管理后台页面渲染', () => {
     // 面包屑的当前页也是 role=link，因此用 findAll
     expect((await screen.findAllByRole('link', { name: /仪表盘/ })).length).toBeGreaterThan(0)
     const links = screen.getAllByRole('link').map((el) => el.textContent ?? '')
-    for (const name of ['仪表盘', '设备', '供应商', '模型', '试跑', '设置']) {
+    for (const name of ['仪表盘', '设备', '供应商', '模型', '请求日志', '试跑', '设置']) {
       expect(links.some((text) => text.includes(name))).toBe(true)
     }
   })
@@ -263,5 +315,25 @@ describe('管理后台页面渲染', () => {
     expect(await screen.findByText('供应商加载失败：服务不可用')).toBeInTheDocument()
     expect(screen.queryByText('还没有供应商')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+  })
+
+  it('请求日志页展示流式TPS、入出缓Token、首总耗时并支持点击跳转设备及流式筛选', async () => {
+    renderAt('/ai/requests')
+    expect((await screen.findAllByText('80.0 t/s')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('入 1,200').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('出 240').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('缓 800 (67%)').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('总 3.50 s').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('首 500 ms').length).toBeGreaterThan(0)
+
+    const userLinks = screen.getAllByRole('link', { name: 'install-…' })
+    expect(userLinks[0]).toHaveAttribute('href', '/devices/d1')
+
+    fireEvent.click(screen.getByRole('button', { name: '流式' }))
+    await waitFor(() =>
+      expect(
+        vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes('stream=true')),
+      ).toBe(true),
+    )
   })
 })

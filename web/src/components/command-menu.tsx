@@ -6,6 +6,7 @@ import {
   CpuIcon,
   LayoutDashboardIcon,
   MessageSquareIcon,
+  ScrollTextIcon,
   SearchIcon,
   SettingsIcon,
   SmartphoneIcon,
@@ -27,6 +28,7 @@ const entries = [
   { title: 'AI 用量', url: '/usage', icon: BarChart3Icon, group: '运营' },
   { title: '供应商', url: '/ai/providers', icon: BotIcon, group: 'AI' },
   { title: '模型', url: '/ai/models', icon: CpuIcon, group: 'AI' },
+  { title: '请求日志', url: '/ai/requests', icon: ScrollTextIcon, group: 'AI' },
   { title: '试跑', url: '/ai/playground', icon: MessageSquareIcon, group: 'AI' },
   { title: '设置', url: '/settings', icon: SettingsIcon, group: '系统' },
 ]

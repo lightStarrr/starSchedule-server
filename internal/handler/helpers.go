@@ -46,6 +46,7 @@ func (d *Deps) writeRequestLog(c *gin.Context, caller chatCaller, snap *service.
 		ErrorCode:        opt.ErrorCode,
 		PromptTokens:     opt.Usage.PromptTokens,
 		CompletionTokens: opt.Usage.CompletionTokens,
+		CachedTokens:     opt.Usage.CachedTokens,
 		TotalTokens:      opt.Usage.TotalTokens,
 		Estimated:        opt.Usage.Estimated,
 		FirstTokenMS:     opt.FirstTokenMS,

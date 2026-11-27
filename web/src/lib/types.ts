@@ -164,6 +164,35 @@ export interface UsageByDevice {
   errors: number
 }
 
+export interface AIRequestLogItem {
+  id: string
+  request_id: string
+  created_at: string
+  source: 'device' | 'playground' | string
+  device_id?: string
+  install_id?: string
+  admin_id?: string
+  admin_username?: string
+  provider_name?: string
+  model: string
+  stream: boolean
+  status: 'ok' | 'error' | string
+  http_status: number
+  error_code?: string
+  prompt_tokens: number
+  completion_tokens: number
+  cached_tokens: number
+  total_tokens: number
+  estimated: boolean
+  first_token_ms?: number | null
+  total_ms?: number | null
+  tps?: number | null
+}
+
+export interface AIRequestLogPage extends CursorPage<AIRequestLogItem> {
+  models?: string[]
+}
+
 export type SettingKey =
 	| 'ai.quota_unlimited'
   | 'ai.daily_token_quota'

@@ -134,9 +134,21 @@ func ReadNonStream(reader io.Reader, alias string, promptEstimate int) (*ChatRes
 	if err != nil {
 		return nil, err
 	}
-	var out ChatResponse
-	if err := json.Unmarshal(body, &out); err != nil {
+	var raw struct {
+		ChatResponse
+		Usage *upstreamUsage `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("解析上游响应失败: %w", err)
+	}
+	out := raw.ChatResponse
+	if raw.Usage != nil {
+		out.Usage = Usage{
+			PromptTokens:     raw.Usage.PromptTokens,
+			CompletionTokens: raw.Usage.CompletionTokens,
+			CachedTokens:     raw.Usage.cachedTokens(),
+			TotalTokens:      raw.Usage.TotalTokens,
+		}
 	}
 	if out.Object == "" {
 		out.Object = "chat.completion"

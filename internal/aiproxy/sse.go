@@ -17,16 +17,19 @@ const (
 )
 
 type Meta struct {
-	ID        string `json:"id"`
-	Model     string `json:"model"`
-	Alias     string `json:"alias"`
-	RequestID string `json:"request_id"`
+	ID        string    `json:"id"`
+	Model     string    `json:"model"`
+	Alias     string    `json:"alias"`
+	RequestID string    `json:"request_id"`
+	StartedAt time.Time `json:"-"`
 }
 
 type StreamResult struct {
 	PromptTokens     int
 	CompletionTokens int
+	CachedTokens     int
 	Estimated        bool
+	HasFirstToken    bool
 	FirstTokenMS     int
 	TotalMS          int
 	FinishReason     string
@@ -47,7 +50,10 @@ func Relay(ctx context.Context, w http.ResponseWriter, upstream io.Reader, meta 
 	promptEstimate int, maxOutput int) (res StreamResult, relayErr error) {
 
 	res.PromptTokens = promptEstimate
-	start := time.Now()
+	start := meta.StartedAt
+	if start.IsZero() {
+		start = time.Now()
+	}
 	var completion strings.Builder
 	usageSeen := false
 	finalizeUsage := func() {
@@ -216,13 +222,15 @@ func Relay(ctx context.Context, w http.ResponseWriter, upstream io.Reader, meta 
 						usageSeen = true
 						res.PromptTokens = chunk.Usage.PromptTokens
 						res.CompletionTokens = chunk.Usage.CompletionTokens
+						res.CachedTokens = chunk.Usage.cachedTokens()
 						res.Estimated = false
 					}
 					recordOutput := func(s string) {
 						if s == "" {
 							return
 						}
-						if res.FirstTokenMS == 0 {
+						if !res.HasFirstToken {
+							res.HasFirstToken = true
 							res.FirstTokenMS = int(time.Since(start).Milliseconds())
 						}
 						completion.WriteString(s)
